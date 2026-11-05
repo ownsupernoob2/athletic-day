@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/*
+  King's High School look: white pages, school blue (#009fe3) and navy (#00225a),
+  Raleway type with thin, light headings. Tailwind's zinc and indigo are re-pointed
+  at this palette so every page picks it up.
+*/
+@theme {
+  --color-paper: #ffffff;
+  --color-ink: #00225a;
+  --color-signal: #009fe3;
+  --color-navy: #14203c;
+
+  --color-zinc-50: #f5f8fb;
+  --color-zinc-100: #edf1f6;
+  --color-zinc-200: #dde4ec;
+  --color-zinc-300: #c8d1dc;
+  --color-zinc-400: #94a0b0;
+  --color-zinc-500: #647085;
+  --color-zinc-600: #4a5568;
+  --color-zinc-700: #374151;
+  --color-zinc-800: #1f2937;
+  --color-zinc-900: #14203c;
+
+  --color-indigo-50: #e6f6fd;
+  --color-indigo-200: #99d9f4;
+  --color-indigo-300: #66c5ee;
+  --color-indigo-500: #009fe3;
+  --color-indigo-600: #009fe3;
+  --color-indigo-700: #0082ba;
+}
+
+@theme inline {
+  --font-sans: var(--font-raleway);
+  --font-display: var(--font-raleway);
+  --font-mono: var(--font-raleway);
+  /* printed booklet only */
+  --font-print: var(--font-overpass);
+  --font-print-mono: var(--font-overpass-mono);
+}
+
+html {
+  background: #fff;
+  color: #333;
+}
+
+body {
+  font-family: var(--font-raleway), sans-serif;
+  font-feature-settings: "lnum" 1; /* Raleway defaults to old-style numbers */
+  -webkit-font-smoothing: antialiased;
+  text-wrap: pretty;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+button:not(:disabled),
+[role="button"],
+select,
+summary {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-signal);
+  color: #fff;
+}
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Booklet preview: real millimetre sizes, shrunk on screen only. */
+.sheet-zoom {
+  zoom: 0.72;
+}
+@media (max-width: 900px) {
+  .sheet-zoom {
+    zoom: 0.36;
+  }
+}
+.paper-shadow {
+  box-shadow: 0 0 0 1px #d9d5cb, 0 8px 24px -12px rgb(0 0 0 / 0.25);
+}
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .sheet-zoom {
+    zoom: 1;
+  }
+  .paper-shadow {
+    box-shadow: none;
+  }
+  .print-side {
+    break-after: page;
+    break-inside: avoid;
+  }
+  .print-side:last-child {
+    break-after: auto;
+  }
+}

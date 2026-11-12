@@ -33,6 +33,8 @@ function StaffDashboard() {
   const pending = useRef(0);
 
   const min = settings?.min_events ?? 3;
+  const limits = settings ? { maxTotal: settings.max_events, maxPerType: settings.max_per_type } : undefined;
+  const kindOf = new Map((events ?? []).map((e) => [e.id, e.kind]));
   const ready = students?.filter((s) => s.events.length >= min).length ?? 0;
 
   async function toggle(st: Student, ev: AthleticEvent, on: boolean) {
@@ -88,7 +90,7 @@ function StaffDashboard() {
 
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <p className="max-w-xl text-[15px] text-zinc-600">
-          Hello {user.name}. Tap the events each student will do. Every student needs at least <strong className="text-ink">{min}</strong>. Changes save automatically.
+          Hello {user.name}. Tap the events each student will do. Every student needs at least <strong className="text-ink">{min}</strong>, and no more than <strong className="text-ink">{limits?.maxTotal ?? 5}</strong> (at most <strong className="text-ink">{limits?.maxPerType ?? 3}</strong> track and <strong className="text-ink">{limits?.maxPerType ?? 3}</strong> field). Changes save automatically.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <SaveBadge state={save} />
@@ -138,10 +140,11 @@ function StaffDashboard() {
                           </p>
                           <p className="mt-1 font-mono text-xs text-zinc-500">
                             AGE {s.age}
+                            {s.events.length > 0 && ` · ${s.events.filter((id) => kindOf.get(id) === "track").length} TRACK, ${s.events.filter((id) => kindOf.get(id) === "field").length} FIELD`}
                             {s.added_by_staff && " · ADDED BY STAFF"}
                           </p>
                         </div>
-                        <EventPicker events={events} selected={s.events} onToggle={(ev, on) => toggle(s, ev, on)} compact />
+                        <EventPicker events={events} selected={s.events} onToggle={(ev, on) => toggle(s, ev, on)} compact limits={limits} />
                         <p className={cx("text-3xl font-light tabular-nums lg:text-right", done ? "text-ink" : "text-signal")} aria-label={`${s.events.length} of ${min} events`}>
                           {done ? <Check className="inline size-7" strokeWidth={3} /> : `${s.events.length}/${min}`}
                         </p>

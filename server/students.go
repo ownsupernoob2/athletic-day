@@ -340,6 +340,21 @@ func (s *Server) handleClearStudents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// overLimit says why one more event would break the rules for this student, or "" if it is fine.
+func (s *Server) overLimit(sid, eid int64, kind, first string) string {
+	_, max, perType := eventLimits(s.db)
+	var total, same int
+	s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(v.kind=?),0) FROM entries e JOIN events v ON v.id=e.event_id
+		WHERE e.student_id=? AND e.event_id<>?`, kind, sid, eid).Scan(&total, &same)
+	switch {
+	case total+1 > max:
+		return fmt.Sprintf("%s already has %d events, the most allowed. Take one off first.", first, max)
+	case same+1 > perType:
+		return fmt.Sprintf("%s already has %d %s events, the most allowed. Take one off first.", first, perType, kind)
+	}
+	return ""
+}
+
 // handleSetEntry is the auto-save endpoint: tick or untick one event for one student.
 func (s *Server) handleSetEntry(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
@@ -363,10 +378,18 @@ func (s *Server) handleSetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var active int
-	var code string
-	if err := s.db.QueryRow(`SELECT active,code FROM events WHERE id=?`, eid).Scan(&active, &code); err != nil || (active == 0 && u.Role == roleStaff) {
+	var code, kind string
+	if err := s.db.QueryRow(`SELECT active,code,kind FROM events WHERE id=?`, eid).Scan(&active, &code, &kind); err != nil || (active == 0 && u.Role == roleStaff) {
 		fail(w, 404, "Event not found")
 		return
+	}
+	// Staff can't go over the limits. Taking an event off is always allowed, and the
+	// organiser can make an exception.
+	if in.On && u.Role == roleStaff {
+		if msg := s.overLimit(sid, eid, kind, first); msg != "" {
+			fail(w, 409, msg)
+			return
+		}
 	}
 	var err error
 	if in.On {

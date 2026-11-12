@@ -10,13 +10,23 @@ export function EventPicker({
   selected,
   onToggle,
   compact,
+  limits,
 }: {
   events: AthleticEvent[];
   selected: number[];
   onToggle: (event: AthleticEvent, on: boolean) => void;
   compact?: boolean;
+  /** When given, events that would go over the limits can't be picked. Taking one off is always allowed. */
+  limits?: { maxTotal: number; maxPerType: number };
 }) {
   const sel = new Set(selected);
+  const chosen = events.filter((e) => sel.has(e.id));
+  const blockedReason = (e: AthleticEvent) => {
+    if (!limits || sel.has(e.id)) return "";
+    if (chosen.length >= limits.maxTotal) return `At most ${limits.maxTotal} events. Take one off first.`;
+    if (chosen.filter((c) => c.kind === e.kind).length >= limits.maxPerType) return `At most ${limits.maxPerType} ${e.kind} events. Take one off first.`;
+    return "";
+  };
   const groups = [
     { label: "Track", items: events.filter((e) => e.kind === "track") },
     { label: "Field", items: events.filter((e) => e.kind === "field") },
@@ -30,16 +40,22 @@ export function EventPicker({
           <div className="flex flex-wrap gap-1.5">
             {g.items.map((e) => {
               const on = sel.has(e.id);
+              const blocked = blockedReason(e);
               return (
                 <button
                   key={e.id}
                   type="button"
                   aria-pressed={on}
-                  title={e.name}
+                  disabled={!!blocked}
+                  title={blocked || e.name}
                   onClick={() => onToggle(e, !on)}
                   className={cx(
                     "inline-flex h-8 items-center gap-1 rounded-sm px-2.5 text-sm font-medium transition-colors",
-                    on ? "bg-ink text-white hover:bg-signal" : "bg-transparent text-zinc-600 ring-1 ring-inset ring-ink/20 hover:bg-white hover:text-ink hover:ring-ink",
+                    on
+                      ? "bg-ink text-white hover:bg-signal"
+                      : blocked
+                        ? "bg-transparent text-zinc-300 ring-1 ring-inset ring-zinc-200"
+                        : "bg-transparent text-zinc-600 ring-1 ring-inset ring-ink/20 hover:bg-white hover:text-ink hover:ring-ink",
                   )}
                 >
                   {on && <Check className="size-3.5" strokeWidth={3} />}

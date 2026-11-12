@@ -136,6 +136,8 @@ func (s *Server) bootstrap() error {
 	for k, v := range map[string]string{
 		"title":      "School Athletics Day",
 		"min_events": "3",
+		"max_events": "5", // most events one student can do
+		"max_per_type": "3", // most track, and most field, events one student can do
 		"heat_size":  "6",
 		"published":  "0",
 	} {

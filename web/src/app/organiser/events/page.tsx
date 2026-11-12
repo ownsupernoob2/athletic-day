@@ -127,15 +127,17 @@ function SettingsCard({ settings, onSaved }: { settings: Settings; onSaved: () =
   const [title, setTitle] = useState(settings.title);
   const [date, setDate] = useState(settings.event_date);
   const [min, setMin] = useState(String(settings.min_events));
+  const [max, setMax] = useState(String(settings.max_events));
+  const [perType, setPerType] = useState(String(settings.max_per_type));
   const [heat, setHeat] = useState(String(settings.heat_size));
   const [busy, setBusy] = useState(false);
-  const dirty = title !== settings.title || date !== settings.event_date || min !== String(settings.min_events) || heat !== String(settings.heat_size);
+  const dirty = title !== settings.title || date !== settings.event_date || min !== String(settings.min_events) || max !== String(settings.max_events) || perType !== String(settings.max_per_type) || heat !== String(settings.heat_size);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.put("/api/settings", { title, event_date: date, min_events: Number(min), heat_size: Number(heat) });
+      await api.put("/api/settings", { title, event_date: date, min_events: Number(min), max_events: Number(max), max_per_type: Number(perType), heat_size: Number(heat) });
       toast("Settings saved");
       onSaved();
     } catch (err) {
@@ -153,11 +155,17 @@ function SettingsCard({ settings, onSaved }: { settings: Settings; onSaved: () =
         <Field label="Athletics day" hint="Ages are worked out on this date">
           {(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Min. events" hint="Per student">
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4 lg:col-span-4">
+          <Field label="Fewest events" hint="Each student needs at least this many">
             {(id) => <Input id={id} type="number" min={0} max={20} value={min} onChange={(e) => setMin(e.target.value)} />}
           </Field>
-          <Field label="Heat size" hint="Max runners">
+          <Field label="Most events" hint="In total. Staff can't pick more">
+            {(id) => <Input id={id} type="number" min={1} max={20} value={max} onChange={(e) => setMax(e.target.value)} />}
+          </Field>
+          <Field label="Most of one type" hint="Track, and field, each">
+            {(id) => <Input id={id} type="number" min={1} max={20} value={perType} onChange={(e) => setPerType(e.target.value)} />}
+          </Field>
+          <Field label="Heat size" hint="Most runners in a heat">
             {(id) => <Input id={id} type="number" min={1} max={20} value={heat} onChange={(e) => setHeat(e.target.value)} />}
           </Field>
         </div>

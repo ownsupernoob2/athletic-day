@@ -41,6 +41,8 @@ export type Settings = {
   title: string;
   event_date: string;
   min_events: number;
+  max_events: number;
+  max_per_type: number;
   heat_size: number;
   published: boolean;
   generated_at: string;

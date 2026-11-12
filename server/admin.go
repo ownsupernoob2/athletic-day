@@ -8,13 +8,24 @@ import (
 
 // ---------- settings ----------
 
+// eventLimits are the rules for how many events one student can do: at least min,
+// at most max in total, and at most maxPerType track and at most maxPerType field.
+func eventLimits(db *DB) (min, max, maxPerType int) {
+	min, _ = strconv.Atoi(getSetting(db, "min_events", "3"))
+	max, _ = strconv.Atoi(getSetting(db, "max_events", "5"))
+	maxPerType, _ = strconv.Atoi(getSetting(db, "max_per_type", "3"))
+	return
+}
+
 func (s *Server) settings() map[string]any {
-	min, _ := strconv.Atoi(getSetting(s.db, "min_events", "3"))
+	min, max, maxPerType := eventLimits(s.db)
 	heat, _ := strconv.Atoi(getSetting(s.db, "heat_size", "6"))
 	return map[string]any{
 		"title":              getSetting(s.db, "title", "School Athletics Day"),
 		"event_date":         getSetting(s.db, "event_date", ""),
 		"min_events":         min,
+		"max_events":         max,
+		"max_per_type":       maxPerType,
 		"heat_size":          heat,
 		"published":          getSetting(s.db, "published", "0") == "1",
 		"generated_at":       getSetting(s.db, "generated_at", ""),
@@ -34,9 +45,26 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		Title     *string `json:"title"`
 		EventDate *string `json:"event_date"`
 		MinEvents *int    `json:"min_events"`
+		MaxEvents *int    `json:"max_events"`
+		PerType   *int    `json:"max_per_type"`
 		HeatSize  *int    `json:"heat_size"`
 	}
 	if !readJSON(w, r, &in) {
+		return
+	}
+	min, max, _ := eventLimits(s.db)
+	if in.MinEvents != nil {
+		min = *in.MinEvents
+	}
+	if in.MaxEvents != nil {
+		max = *in.MaxEvents
+	}
+	if in.MaxEvents != nil && (*in.MaxEvents < 1 || *in.MaxEvents > 20) || in.PerType != nil && (*in.PerType < 1 || *in.PerType > 20) {
+		fail(w, 400, "Event limits must be between 1 and 20")
+		return
+	}
+	if max < min {
+		fail(w, 400, "The most events can't be fewer than the minimum")
 		return
 	}
 	if in.Title != nil {
@@ -63,6 +91,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		setSetting(s.db, "min_events", strconv.Itoa(*in.MinEvents))
+	}
+	if in.MaxEvents != nil {
+		setSetting(s.db, "max_events", strconv.Itoa(*in.MaxEvents))
+	}
+	if in.PerType != nil {
+		setSetting(s.db, "max_per_type", strconv.Itoa(*in.PerType))
 	}
 	if in.HeatSize != nil {
 		if *in.HeatSize < 1 || *in.HeatSize > 20 {

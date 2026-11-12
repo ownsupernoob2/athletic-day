@@ -29,15 +29,15 @@ export async function signOut() {
   window.location.href = "/";
 }
 
-/** Renders children only for the given role; otherwise sends people where they belong. */
-export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
+/** Renders children only for the given role (or any signed-in user when no role is given); otherwise sends people where they belong. */
+export function RequireRole({ role, children }: { role?: Role; children: ReactNode }) {
   const { user, loading } = useUser();
   const router = useRouter();
   useEffect(() => {
     if (loading) return;
     if (!user) router.replace("/login");
-    else if (user.role !== role) router.replace(homeFor(user.role));
+    else if (role && user.role !== role) router.replace(homeFor(user.role));
   }, [user, loading, role, router]);
-  if (loading || !user || user.role !== role) return <Spinner />;
+  if (loading || !user || (role && user.role !== role)) return <Spinner />;
   return <>{children}</>;
 }

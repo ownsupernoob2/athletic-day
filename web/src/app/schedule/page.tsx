@@ -113,13 +113,16 @@ export default function SchedulePage() {
             </div>
             {ev.ages.map((ag) => (
               <div key={ag.name} className="mt-8 grid gap-4 md:grid-cols-[160px_1fr] md:gap-8">
-                <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500 md:pt-4">{ag.name}</h3>
+                <div className="md:pt-4">
+                  <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{ag.name}</h3>
+                  {ag.heats[0]?.time && <p className="mt-1.5 text-2xl font-light tabular-nums text-ink">{ag.heats[0].time}</p>}
+                </div>
                 <div className="divide-y divide-zinc-200 border-t border-zinc-300">
                   {ag.heats.map((h) => (
                     <div key={h.id} className="grid grid-cols-[4.5rem_1fr] gap-4 py-4 sm:grid-cols-[6rem_1fr]">
                       <div>
                         <p className="text-5xl font-light leading-[0.9] tabular-nums text-signal sm:text-6xl">{h.number}</p>
-                        <p className="mt-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Heat{h.time && ` · ${h.time}`}</p>
+                        <p className="mt-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Heat</p>
                       </div>
                       <ol className="grid content-start gap-x-8 sm:grid-cols-2">
                         {h.students.map((s, i) => {

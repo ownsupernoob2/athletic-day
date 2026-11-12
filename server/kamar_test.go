@@ -123,6 +123,26 @@ func TestKamarStudentSync(t *testing.T) {
 		t.Errorf("Tui stored as %s %s", group, dob)
 	}
 
+	// Leavers: a past leaving date removes the student, a new leaver is never added,
+	// and a future leaving date changes nothing.
+	s.db.Exec(`INSERT INTO students(first_name,last_name,dob,group_code,kamar_id,created_at,updated_at) VALUES('Gone','Soon','2011-01-01','TLK','200',?,?)`, now(), now())
+	s.db.Exec(`INSERT INTO students(first_name,last_name,dob,group_code,kamar_id,created_at,updated_at) VALUES('Still','Here','2011-01-01','TLK','201',?,?)`, now(), now())
+	if c := user(msg("part", `{"id":200,"leavingdate":"20200101"},
+		{"id":201,"leavingdate":"20991231"},
+		{"id":202,"firstname":"Never","lastname":"Arrived","tutor":"WND","datebirth":"20120101","leavingdate":"20200101"}`)); c != 200 {
+		t.Fatalf("leavers: %d", c)
+	}
+	if n := count(t, s, `kamar_id='200'`); n != 0 {
+		t.Errorf("leaver was not removed")
+	}
+	if n := count(t, s, `kamar_id='201'`); n != 1 {
+		t.Errorf("student with a future leaving date was removed")
+	}
+	if n := count(t, s, `kamar_id='202'`); n != 0 {
+		t.Errorf("new leaver was added")
+	}
+	s.db.Exec(`DELETE FROM students WHERE kamar_id='201'`)
+
 	// Part sync with only the changed field must keep everything else.
 	if c := user(msg("part", `{"id":102,"tutor":"WND"}`)); c != 200 {
 		t.Fatalf("part sync: %d", c)

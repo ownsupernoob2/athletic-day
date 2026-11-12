@@ -258,12 +258,21 @@ export default function SchedulePage() {
                     .filter((a) => ev.heats.some((h) => h.age_group === a))
                     .map((a) => (
                       <div key={a}>
-                        <h3 className="mb-2.5 text-sm font-semibold text-indigo-600">{a}</h3>
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="mb-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                          <h3 className="text-sm font-semibold text-indigo-600">{a}</h3>
+                          <BlockTime
+                            key={`${ev.id}-${a}-${ev.heats.find((h) => h.age_group === a)?.time ?? ""}`}
+                            eventName={ev.name}
+                            age={a}
+                            time={ev.heats.find((h) => h.age_group === a)?.time ?? ""}
+                            onSave={(time) => apply(() => api.patch<ScheduleData>("/api/schedule/block-time", { event_id: ev.id, age_group: a, time }), time ? "Start time saved" : "Start time removed")}
+                          />
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                           {ev.heats
                             .filter((h) => h.age_group === a)
                             .map((h) => (
-                              <HeatCard key={`${h.id}-${h.time}`} heat={h} siblings={data.heats.filter((x) => x.event_id === h.event_id)} apply={apply} onAdd={() => setAdding(h)} />
+                              <HeatCard key={h.id} heat={h} siblings={data.heats.filter((x) => x.event_id === h.event_id)} apply={apply} onAdd={() => setAdding(h)} />
                             ))}
                         </div>
                       </div>
@@ -304,36 +313,36 @@ function Banner({ tone, children }: { tone: "amber"; children: React.ReactNode }
 
 type Apply = (fn: () => Promise<ScheduleData>, message?: string) => Promise<void>;
 
+/** Start time for one event and age group, e.g. "Under 14 100m starts 09:30". Saves when you leave the field. */
+function BlockTime({ eventName, age, time, onSave }: { eventName: string; age: string; time: string; onSave: (time: string) => Promise<void> }) {
+  const [value, setValue] = useState(time);
+  const save = () => {
+    if (value !== time) onSave(value);
+  };
+  return (
+    <label className="flex items-center gap-2 text-sm text-zinc-500">
+      Starts
+      <input
+        type="time"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        aria-label={`Start time for ${age} ${eventName}`}
+        className="h-8 w-[8rem] rounded-md border-0 bg-white px-2 text-sm tabular-nums text-ink ring-1 ring-inset ring-zinc-300 hover:ring-zinc-400 focus:ring-2 focus:ring-ink focus:outline-none"
+      />
+    </label>
+  );
+}
+
 function HeatCard({ heat, siblings, apply, onAdd }: { heat: Heat; siblings: Heat[]; apply: Apply; onAdd: () => void }) {
-  const toast = useToast();
-  const [time, setTime] = useState(heat.time);
-
-  async function saveTime() {
-    if (time.trim() === heat.time) return;
-    try {
-      await api.patch(`/api/heats/${heat.id}`, { time });
-      toast("Time saved");
-    } catch (e) {
-      toast(errorMessage(e), "error");
-    }
-  }
-
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2">
         <span className="text-sm font-semibold">Heat {heat.number}</span>
-        <input
-          type="time"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-          onBlur={saveTime}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                    aria-label={`Time for heat ${heat.number}`}
-          className="ml-auto h-7 w-[5.5rem] rounded-md border-0 bg-transparent px-2 text-right text-sm tabular-nums text-zinc-600 ring-1 ring-inset ring-transparent hover:ring-zinc-300 focus:bg-white focus:ring-2 focus:ring-ink focus:outline-none"
-        />
         <button
           onClick={() => apply(() => api.del<ScheduleData>(`/api/heats/${heat.id}`), "Heat deleted")}
-          className="rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-600"
+          className="ml-auto rounded p-1 text-zinc-400 hover:bg-red-50 hover:text-red-600"
           aria-label={`Delete heat ${heat.number}`}
           title="Delete this heat"
         >
@@ -448,18 +457,18 @@ function TimesCard({
     return h * 60 + m;
   };
   const span = start && end ? minutes(end) - minutes(start) : 0;
-  const slot = span > 0 ? span / heats.length : 0;
+  const blocks = new Set(heats.map((h) => `${h.event_id}|${h.age_group}`)).size;
 
   const run = () =>
     hasTimes
-      ? ask({ title: "Replace the current times?", body: "Every heat gets a new time. Times you typed in by hand are replaced.", label: "Set times", run: () => onApply(start, end) })
+      ? ask({ title: "Replace the current times?", body: "Every event and age group gets a new start time. Times you typed in by hand are replaced.", label: "Set times", run: () => onApply(start, end) })
       : onApply(start, end);
 
   return (
     <Card className="mb-6 p-5">
       <h2 className="font-semibold">Times</h2>
       <p className="mt-0.5 text-sm text-zinc-500">
-        Pick when the day starts and when you want everything finished. Heats are spread evenly in between. You can still change any heat&apos;s time below.
+        Pick when the day starts and when you want everything finished. Each event and age group gets a start time, with more time for the ones with more heats. You can change any start time below.
       </p>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="text-sm font-medium">
@@ -474,11 +483,11 @@ function TimesCard({
           Set times automatically
         </Button>
         {hasTimes && (
-          <Button onClick={() => ask({ title: "Clear all times?", body: "Every heat loses its time.", label: "Clear", run: onClear })}>Clear times</Button>
+          <Button onClick={() => ask({ title: "Clear all times?", body: "Every event and age group loses its start time.", label: "Clear", run: onClear })}>Clear times</Button>
         )}
       </div>
       <p className="mt-3 text-sm text-zinc-500">
-        {span > 0 ? `${heats.length} heats in ${Math.floor(span / 60)} h ${span % 60} min is about ${slot < 10 ? slot.toFixed(1) : Math.round(slot)} minutes per heat.` : "The finish time must be after the start time."}
+        {span > 0 ? `${blocks} events and age groups, ${heats.length} heats, over ${Math.floor(span / 60)} h ${span % 60} min.` : "The finish time must be after the start time."}
       </p>
     </Card>
   );

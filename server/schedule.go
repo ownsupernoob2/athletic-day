@@ -31,13 +31,14 @@ type Heat struct {
 	Kind      string        `json:"kind"`
 	AgeGroup  string        `json:"age_group"`
 	Number    int           `json:"number"`
-	Time      string        `json:"time"`
+	Time      string        `json:"time"` // start time of this heat's event and age group, "" if not set
 	Students  []HeatStudent `json:"students"`
 }
 
 func (s *Server) loadHeats() ([]Heat, error) {
-	rows, err := s.db.Query(`SELECT h.id,h.event_id,e.code,e.name,e.kind,h.age_group,h.number,h.time,e.position
-		FROM heats h JOIN events e ON e.id=h.event_id`)
+	rows, err := s.db.Query(`SELECT h.id,h.event_id,e.code,e.name,e.kind,h.age_group,h.number,COALESCE(bt.time,''),e.position
+		FROM heats h JOIN events e ON e.id=h.event_id
+		LEFT JOIN block_times bt ON bt.event_id=h.event_id AND bt.age_group=h.age_group`)
 	if err != nil {
 		return nil, err
 	}
@@ -232,11 +233,17 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSetting(s.db, "generated_at", now())
+	how := "alphabetically"
+	if in.Randomize {
+		how = "randomly"
+	}
+	s.logEvent("schedule", userFrom(r).Name, "built the schedule "+how)
 	s.handleGetSchedule(w, r)
 }
 
 func (s *Server) handleClearSchedule(w http.ResponseWriter, r *http.Request) {
 	s.db.Exec(`DELETE FROM heats`)
+	s.db.Exec(`DELETE FROM block_times`)
 	setSetting(s.db, "published", "0")
 	setSetting(s.db, "generated_at", "")
 	s.handleGetSchedule(w, r)
@@ -262,6 +269,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		v = "1"
 	}
 	setSetting(s.db, "published", v)
+	s.logEvent("schedule", userFrom(r).Name, map[bool]string{true: "published the schedule", false: "unpublished the schedule"}[in.Published])
 	writeJSON(w, 200, s.settings())
 }
 
@@ -288,24 +296,38 @@ func (s *Server) handleCreateHeat(w http.ResponseWriter, r *http.Request) {
 	s.handleGetSchedule(w, r)
 }
 
-func (s *Server) handleUpdateHeat(w http.ResponseWriter, r *http.Request) {
+// handleSetBlockTime sets (or clears, with "") the start time of one event and age group.
+func (s *Server) handleSetBlockTime(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Time string `json:"time"`
+		EventID  int64  `json:"event_id"`
+		AgeGroup string `json:"age_group"`
+		Time     string `json:"time"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM heats WHERE event_id=? AND age_group=?`, in.EventID, in.AgeGroup).Scan(&n)
+	if n == 0 {
+		fail(w, 404, "That event and age group isn't in the schedule")
+		return
+	}
 	t := strings.TrimSpace(in.Time)
-	if t != "" {
+	if t == "" {
+		s.db.Exec(`DELETE FROM block_times WHERE event_id=? AND age_group=?`, in.EventID, in.AgeGroup)
+	} else {
 		m, ok := parseClock(t)
 		if !ok {
 			fail(w, 400, "Time must look like 09:30")
 			return
 		}
-		t = fmtClock(m)
+		if _, err := s.db.Exec(`INSERT INTO block_times(event_id,age_group,time) VALUES(?,?,?)
+			ON CONFLICT(event_id,age_group) DO UPDATE SET time=excluded.time`, in.EventID, in.AgeGroup, fmtClock(m)); err != nil {
+			serverErr(w, err)
+			return
+		}
 	}
-	s.db.Exec(`UPDATE heats SET time=? WHERE id=?`, t, pathID(r, "id"))
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	s.handleGetSchedule(w, r)
 }
 
 func (s *Server) renumber(eventID int64, age string) {
@@ -457,9 +479,10 @@ func parseClock(v string) (int, bool) {
 
 func fmtClock(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
 
-// handleSetTimes gives every heat a start time. With start and end it spreads the
-// heats evenly across the day, in schedule order, so the last heat finishes at `end`.
-// Individual times can still be edited by hand afterwards. {"clear": true} removes all times.
+// handleSetTimes gives every event and age group a start time. With start and end it
+// spreads them across the day in schedule order, each getting time in proportion to how
+// many heats it has, so the last one finishes at `end`. Any time can still be edited by hand
+// afterwards. {"clear": true} removes all times.
 func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Start string `json:"start"`
@@ -470,7 +493,7 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Clear {
-		s.db.Exec(`UPDATE heats SET time=''`)
+		s.db.Exec(`DELETE FROM block_times`)
 		s.handleGetSchedule(w, r)
 		return
 	}
@@ -493,8 +516,24 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Create the schedule first")
 		return
 	}
-	slot := float64(end-start) / float64(len(heats))
-	step := 5.0 // tidy 5-minute marks, unless heats are shorter than that
+
+	// loadHeats is in schedule order, so blocks (event + age group) come out in order too.
+	type block struct {
+		event int64
+		age   string
+		heats int
+	}
+	var blocks []block
+	for _, h := range heats {
+		if n := len(blocks); n > 0 && blocks[n-1].event == h.EventID && blocks[n-1].age == h.AgeGroup {
+			blocks[n-1].heats++
+		} else {
+			blocks = append(blocks, block{h.EventID, h.AgeGroup, 1})
+		}
+	}
+
+	slot := float64(end-start) / float64(len(heats)) // minutes per heat
+	step := 5.0                                      // tidy 5-minute marks, unless heats are shorter than that
 	if slot < 5 {
 		step = 1
 	}
@@ -504,12 +543,18 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	for i, h := range heats {
-		m := start + int(math.Round(float64(i)*slot/step)*step)
-		if _, err := tx.Exec(`UPDATE heats SET time=? WHERE id=?`, fmtClock(m), h.ID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM block_times`); err != nil {
+		serverErr(w, err)
+		return
+	}
+	done := 0
+	for _, b := range blocks {
+		m := start + int(math.Floor(float64(done)*slot/step)*step) // floor: never reaches `end`
+		if _, err := tx.Exec(`INSERT INTO block_times(event_id,age_group,time) VALUES(?,?,?)`, b.event, b.age, fmtClock(m)); err != nil {
 			serverErr(w, err)
 			return
 		}
+		done += b.heats
 	}
 	if err := tx.Commit(); err != nil {
 		serverErr(w, err)
@@ -517,5 +562,6 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	}
 	setSetting(s.db, "day_start", fmtClock(start))
 	setSetting(s.db, "day_end", fmtClock(end))
+	s.logEvent("schedule", userFrom(r).Name, fmt.Sprintf("set times for %d events and age groups, %s to %s", len(blocks), fmtClock(start), fmtClock(end)))
 	s.handleGetSchedule(w, r)
 }

@@ -122,9 +122,12 @@ function EntryView({ entry, style }: { entry: Entry; style: PrintStyle }) {
 function HeaderView({ header }: { header: Header }) {
   if (header.kind === "title")
     return (
-      <div style={{ height: mm(9.5), paddingTop: mm(3), fontWeight: 700, fontSize: "11pt", lineHeight: mm(5) }}>
-        {header.text}
-        {header.cont && " (continued)"}
+      <div className="flex items-baseline justify-between gap-3" style={{ height: mm(9.5), paddingTop: mm(3), fontWeight: 700, fontSize: "11pt", lineHeight: mm(5) }}>
+        <span>
+          {header.text}
+          {header.cont && " (continued)"}
+        </span>
+        {header.time && <span>{header.time}</span>}
       </div>
     );
   if (header.kind === "event")
@@ -142,8 +145,9 @@ function HeaderView({ header }: { header: Header }) {
       </div>
     );
   return (
-    <div className="flex items-end font-print-mono font-semibold uppercase" style={{ height: mm(7.5), paddingBottom: "1mm", fontSize: "6.5pt", letterSpacing: "0.16em", color: "#555" }}>
-      {header.text}
+    <div className="flex items-end justify-between font-print-mono font-semibold uppercase" style={{ height: mm(7.5), paddingBottom: "1mm", fontSize: "6.5pt", letterSpacing: "0.16em", color: "#555" }}>
+      <span>{header.text}</span>
+      {header.time && <span style={{ color: "#000", fontSize: "8pt" }}>{header.time}</span>}
     </div>
   );
 }
@@ -162,7 +166,6 @@ function TradHeat({ heat }: { heat: Heat }) {
     <div className="grid" style={{ gridTemplateColumns: "14mm 1fr 1fr", columnGap: "3mm", height: mm(rows * LINE + 3.2), paddingBottom: mm(3.2) }}>
       <div>
         <b>Heat {heat.number}</b>
-        {heat.time && <div style={{ fontSize: "8pt" }}>{heat.time}</div>}
       </div>
       <div>{heat.students.slice(0, 4).map(row)}</div>
       <div>{heat.students.slice(4).map(row)}</div>
@@ -178,7 +181,6 @@ function ModernHeat({ heat }: { heat: Heat }) {
         <p className="font-print font-extrabold tabular-nums" style={{ fontSize: "26pt", lineHeight: 0.85, letterSpacing: "-0.04em" }}>
           {heat.number}
         </p>
-        {heat.time && <p className="font-print-mono font-semibold" style={{ fontSize: "7pt", lineHeight: 1, marginTop: "1.5mm" }}>{heat.time}</p>}
       </div>
       <ol className="grid grid-cols-2 content-start gap-x-4" style={{ gridAutoRows: mm(LINE) }}>
         {heat.students.map((s) => (

@@ -12,6 +12,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -25,6 +26,12 @@ type Server struct {
 	limit     *loginLimiter
 	kamarUser string // KAMAR Directory Services login. Empty = KAMAR is refused.
 	kamarPass string
+
+	events   *eventLog // recent activity, for the demo view
+	started  time.Time
+	requests int64
+	demo     bool // DEMO_VISIBILITY=1: show who has finished and what the server is doing
+	dbPath   string
 }
 
 func env(key, def string) string {
@@ -65,7 +72,17 @@ func main() {
 	}
 	defer db.Close()
 
-	s := &Server{db: db, secure: os.Getenv("COOKIE_SECURE") == "1", limit: newLoginLimiter(),
+	// One-off maintenance for the demo: give the dummy students new event picks.
+	if len(os.Args) > 1 && os.Args[1] == "reroll-demo-entries" {
+		n, err := (&Server{db: db}).rerollDemoEntries()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Gave %d dummy students new events\n", n)
+		return
+	}
+
+	s := &Server{events: newEventLog(300), started: time.Now(), demo: os.Getenv("DEMO_VISIBILITY") == "1", dbPath: env("DB_PATH", "athletic.db"), db: db, secure: os.Getenv("COOKIE_SECURE") == "1", limit: newLoginLimiter(),
 		kamarUser: os.Getenv("KAMAR_USERNAME"), kamarPass: os.Getenv("KAMAR_PASSWORD")}
 	if s.kamarUser == "" || s.kamarPass == "" {
 		log.Print("KAMAR_USERNAME / KAMAR_PASSWORD not set: KAMAR requests will be refused")
@@ -81,6 +98,7 @@ func main() {
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
+	s.logEvent("system", "server", "started"+map[bool]string{true: " (demo view on)", false: ""}[s.demo])
 	log.Printf("API listening on %s", srv.Addr)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -105,6 +123,8 @@ func (s *Server) routes() http.Handler {
 
 	// --- staff + organiser ---
 	mux.HandleFunc("GET /api/settings", authed(s.handleGetSettings))
+	mux.HandleFunc("GET /api/progress", authed(s.handleProgress))
+	mux.HandleFunc("GET /api/activity", authed(s.handleActivity))
 	mux.HandleFunc("GET /api/events", authed(s.handleListEvents))
 	mux.HandleFunc("GET /api/students", authed(s.handleListStudents))
 	mux.HandleFunc("POST /api/students", authed(s.handleCreateStudent))
@@ -137,12 +157,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/schedule/times", org(s.handleSetTimes))
 	mux.HandleFunc("DELETE /api/schedule", org(s.handleClearSchedule))
 	mux.HandleFunc("POST /api/heats", org(s.handleCreateHeat))
-	mux.HandleFunc("PATCH /api/heats/{id}", org(s.handleUpdateHeat))
+	mux.HandleFunc("PATCH /api/schedule/block-time", org(s.handleSetBlockTime))
 	mux.HandleFunc("DELETE /api/heats/{id}", org(s.handleDeleteHeat))
 	mux.HandleFunc("POST /api/heats/{id}/students", org(s.handleHeatAddStudent))
 	mux.HandleFunc("DELETE /api/heats/{id}/students/{sid}", org(s.handleHeatRemoveStudent))
 
-	return securityHeaders(mux)
+	return securityHeaders(s.countRequests(mux))
 }
 
 func securityHeaders(next http.Handler) http.Handler {

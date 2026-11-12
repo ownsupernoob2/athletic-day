@@ -163,6 +163,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, sql.ErrNoRows) {
 		bcrypt.CompareHashAndPassword(dummyHash, []byte(in.Password)) // keep timing similar
 		s.limit.record(key)
+		s.logEvent("auth", "", "failed sign-in for "+email+" (no such account)")
 		fail(w, 401, "Wrong email or password")
 		return
 	} else if err != nil {
@@ -171,6 +172,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil {
 		s.limit.record(key)
+		s.logEvent("auth", "", "failed sign-in for "+email+" (wrong password)")
 		fail(w, 401, "Wrong email or password")
 		return
 	}
@@ -194,6 +196,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.House = houseOf(u.GroupCode)
+	s.logEvent("auth", u.Name, "signed in ("+u.Role+")")
 	writeJSON(w, 200, u)
 }
 

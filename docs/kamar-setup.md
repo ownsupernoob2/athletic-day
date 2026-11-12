@@ -4,7 +4,7 @@ For the school's KAMAR administrator. This lets KAMAR send the student list to A
 
 ## What is shared
 
-Only four things about each student:
+Only five things about each student:
 
 | Item | KAMAR field |
 |---|---|
@@ -12,8 +12,9 @@ Only four things about each student:
 | Last name | `lastname` |
 | Date of birth | `datebirth` |
 | Group (tutor class, 3 letters like SSH) | `tutor` |
+| Leaving date (so students who leave are removed from the list) | `leavingdate` |
 
-Nothing else is requested: no photos, timetables, attendance, pastoral notes, caregivers, addresses, ethnicity or staff data.
+The leaving date is used only to remove a student once they have left. A leaving date in the future changes nothing. Nothing else is requested: no photos, timetables, attendance, pastoral notes, caregivers, addresses, ethnicity or staff data.
 Students who have opted out in the Data Sharing Service screen are not sent by KAMAR.
 
 The tutor class must be exactly 3 letters, and its first letter is the house (S Stuart, T Tudor, W Windsor, H Hanover). Students whose tutor class looks different are skipped. The organiser can add them by hand.

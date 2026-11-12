@@ -278,6 +278,7 @@ func (s *Server) handleCreateStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
+	s.logEvent("students", u.Name, "added "+in.FirstName+" "+in.LastName+" to "+in.GroupCode)
 	list, _ := s.loadStudents("", id)
 	if len(list) == 0 {
 		serverErr(w, errors.New("student vanished"))
@@ -349,8 +350,8 @@ func (s *Server) handleSetEntry(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	var group string
-	if err := s.db.QueryRow(`SELECT group_code FROM students WHERE id=?`, sid).Scan(&group); errors.Is(err, sql.ErrNoRows) {
+	var group, first, last string
+	if err := s.db.QueryRow(`SELECT group_code,first_name,last_name FROM students WHERE id=?`, sid).Scan(&group, &first, &last); errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "Student not found")
 		return
 	} else if err != nil {
@@ -362,7 +363,8 @@ func (s *Server) handleSetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var active int
-	if err := s.db.QueryRow(`SELECT active FROM events WHERE id=?`, eid).Scan(&active); err != nil || (active == 0 && u.Role == roleStaff) {
+	var code string
+	if err := s.db.QueryRow(`SELECT active,code FROM events WHERE id=?`, eid).Scan(&active, &code); err != nil || (active == 0 && u.Role == roleStaff) {
 		fail(w, 404, "Event not found")
 		return
 	}
@@ -379,6 +381,11 @@ func (s *Server) handleSetEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	s.db.Exec(`UPDATE students SET updated_at=? WHERE id=?`, now(), sid)
 	touchEntries(s.db)
+	verb := "ticked"
+	if !in.On {
+		verb = "unticked"
+	}
+	s.logEvent("entries", u.Name, verb+" "+code+" for "+first+" "+last+" ("+group+")")
 	writeJSON(w, 200, map[string]any{"ok": true, "saved_at": now()})
 }
 
@@ -484,5 +491,6 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	touchEntries(s.db)
+	s.logEvent("students", userFrom(r).Name, fmt.Sprintf("imported a CSV: %d added, %d skipped", res.Added, res.Skipped))
 	writeJSON(w, 200, res)
 }

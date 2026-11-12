@@ -55,6 +55,39 @@ export type KamarStatus = {
   last: { at: string; sync: string; counts: { added: number; updated: number; skipped: number; bad_group: number } } | null;
 };
 
+export type Progress = {
+  min_events: number;
+  demo: boolean;
+  students: number;
+  ready: number;
+  groups_total: number;
+  groups_done: number;
+  schedule: "none" | "draft" | "published";
+  heats: number;
+  groups?: GroupStatus[]; // demo view only
+};
+
+export type ActivityEvent = { at: string; kind: string; actor: string; text: string };
+
+export type Activity = {
+  events: ActivityEvent[];
+  system: {
+    uptime_seconds: number;
+    requests: number;
+    goroutines: number;
+    memory_mb: number;
+    database_kb: number;
+    go_version: string;
+    students: number;
+    entries: number;
+    heats: number;
+    accounts: number;
+    sessions: number;
+    kamar_enabled: boolean;
+    kamar_last: string;
+  };
+};
+
 export type GroupStatus = {
   code: string;
   house: string;

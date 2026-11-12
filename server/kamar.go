@@ -11,8 +11,8 @@ package main
 //   - "deletenotice" the school removed our service: we must delete its data.
 //   - anything else  (timetables, attendance...) is acknowledged and ignored.
 //
-// We only ask for four student fields: preferred first name, last name,
-// date of birth and tutor group. Docs: https://directoryservices.kamar.nz/
+// We only ask for five student fields: preferred first name, last name,
+// date of birth, tutor group and leaving date (so students who leave are removed). Docs: https://directoryservices.kamar.nz/
 
 import (
 	"bytes"
@@ -26,13 +26,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const kamarMaxBody = 64 << 20 // timetable messages are ~3 MB; leave plenty of room
 
 // KAMAR field names we ask for. `firstname` is the *preferred* first name
 // (`firstnamelegal` is the legal one) and `tutor` is the tutor/form class.
-const kamarFields = "firstname;lastname;tutor;datebirth"
+const kamarFields = "firstname;lastname;tutor;datebirth;leavingdate"
 
 // flexString accepts a JSON string or number, because KAMAR is not consistent.
 type flexString string
@@ -61,6 +62,7 @@ type kamarStudent struct {
 	LastName  flexString `json:"lastname"`
 	Tutor     flexString `json:"tutor"`
 	DateBirth flexString `json:"datebirth"`
+	Leaving   flexString `json:"leavingdate"`
 }
 
 type kamarEnvelope struct {
@@ -73,6 +75,7 @@ type kamarEnvelope struct {
 type kamarCounts struct {
 	Added    int `json:"added"`
 	Updated  int `json:"updated"`
+	Removed  int `json:"removed"`
 	Skipped  int `json:"skipped"`
 	BadGroup int `json:"bad_group"`
 }
@@ -125,6 +128,7 @@ func (s *Server) handleKamar(w http.ResponseWriter, r *http.Request) {
 	switch sync := strings.ToLower(msg.Data.Sync); sync {
 	case "check":
 		log.Printf("kamar: check")
+		s.logEvent("kamar", "KAMAR", "check message answered")
 		writeJSON(w, 200, s.kamarCheckReply())
 	case "full", "part":
 		counts, fields, err := s.kamarApplyStudents(msg.Data.Students)
@@ -134,9 +138,10 @@ func (s *Server) handleKamar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Field names only, never values: students are children.
-		log.Printf("kamar: %s sync, %d bytes, added=%d updated=%d skipped=%d badgroup=%d fields=%s",
-			sync, len(body), counts.Added, counts.Updated, counts.Skipped, counts.BadGroup, strings.Join(fields, ","))
+		log.Printf("kamar: %s sync, %d bytes, added=%d updated=%d removed=%d skipped=%d badgroup=%d fields=%s",
+			sync, len(body), counts.Added, counts.Updated, counts.Removed, counts.Skipped, counts.BadGroup, strings.Join(fields, ","))
 		s.kamarRecord(sync, counts)
+		s.logEvent("kamar", "KAMAR", fmt.Sprintf("%s sync: %d added, %d updated, %d removed, %d skipped", sync, counts.Added, counts.Updated, counts.Removed, counts.Skipped))
 		kamarReply(w, 200, "OK")
 	case "deletenotice":
 		// The school removed our service: delete everything that came from them.
@@ -254,6 +259,7 @@ func (s *Server) kamarApplyStudents(raw json.RawMessage) (kamarCounts, []string,
 		return c, fields, err
 	}
 	ref := refDate(s.db)
+	today := time.Now().Format("2006-01-02")
 	tx, err := s.db.Begin()
 	if err != nil {
 		return c, fields, err
@@ -266,6 +272,21 @@ func (s *Server) kamarApplyStudents(raw json.RawMessage) (kamarCounts, []string,
 		if kid == "" {
 			c.Skipped++
 			continue
+		}
+		// A student who has left (leaving date today or earlier) is removed, and not added if new.
+		// A leaving date in the future means they are still here.
+		if v := string(rec.Leaving); v != "" {
+			if d, err := parseDOB(v); err == nil && d <= today {
+				res, err := tx.Exec(`DELETE FROM students WHERE kamar_id=?`, kid)
+				if err != nil {
+					return c, fields, err
+				}
+				if n, _ := res.RowsAffected(); n > 0 {
+					c.Removed++
+					changed = true
+				}
+				continue
+			}
 		}
 		// A part sync may leave out unchanged fields: start from what we already have.
 		var in studentInput

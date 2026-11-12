@@ -3,6 +3,7 @@
 import { AlertCircle, Check, Download, Loader2, Search, UserPlus } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import { DayProgress } from "@/components/DayProgress";
 import { EventPicker } from "@/components/EventPicker";
 import { StudentModal } from "@/components/StudentModal";
 import { Button, buttonClass, cx, Empty, HouseBadge, Input, Progress, Spinner, useToast } from "@/components/ui";
@@ -82,6 +83,8 @@ function StaffDashboard() {
       <div className="mb-8">
         <Progress value={ready} max={students.length} />
       </div>
+
+      <DayProgress />
 
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <p className="max-w-xl text-[15px] text-zinc-600">

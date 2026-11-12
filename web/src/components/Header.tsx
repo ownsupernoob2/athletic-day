@@ -28,6 +28,11 @@ export function Header() {
           <Link href="/schedule" className={cx("text-[15px] hover:text-signal", onSchedule ? "text-signal underline decoration-1 underline-offset-8" : "text-ink")}>
             {user?.role === "organiser" ? "Public schedule" : "Schedule"}
           </Link>
+          {user && (
+            <Link href="/progress" className={cx("text-[15px] hover:text-signal", path === "/progress" ? "text-signal underline decoration-1 underline-offset-8" : "text-ink")}>
+              Day progress
+            </Link>
+          )}
           {user ? (
             <>
               <span className="hidden text-[15px] text-zinc-500 md:inline">{user.name}</span>

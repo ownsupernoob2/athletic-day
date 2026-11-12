@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -247,59 +246,11 @@ type GroupStatus struct {
 }
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
-	min, _ := strconv.Atoi(getSetting(s.db, "min_events", "3"))
-	groups := map[string]*GroupStatus{}
-	get := func(code string) *GroupStatus {
-		g, ok := groups[code]
-		if !ok {
-			g = &GroupStatus{Code: code, House: houseOf(code), Staff: []string{}}
-			groups[code] = g
-		}
-		return g
-	}
-
-	rows, err := s.db.Query(`SELECT s.group_code, COUNT(e.event_id), s.updated_at FROM students s
-		LEFT JOIN entries e ON e.student_id=s.id GROUP BY s.id`)
+	out, err := s.groupStatuses()
 	if err != nil {
 		serverErr(w, err)
 		return
 	}
-	for rows.Next() {
-		var code, upd string
-		var n int
-		rows.Scan(&code, &n, &upd)
-		g := get(code)
-		g.Students++
-		if n >= min {
-			g.Complete++
-		}
-		if n > 0 {
-			g.Started++
-			if upd > g.LastUpdate {
-				g.LastUpdate = upd
-			}
-		}
-	}
-	rows.Close()
-
-	sr, err := s.db.Query(`SELECT group_code,name FROM users WHERE role='staff' AND group_code<>''`)
-	if err != nil {
-		serverErr(w, err)
-		return
-	}
-	for sr.Next() {
-		var code, name string
-		sr.Scan(&code, &name)
-		g := get(code)
-		g.Staff = append(g.Staff, name)
-	}
-	sr.Close()
-
-	out := make([]GroupStatus, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, *g)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
 	writeJSON(w, 200, out)
 }
 
@@ -383,6 +334,7 @@ func (s *Server) handleCreateStaff(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	s.logEvent("staff", userFrom(r).Name, "created the "+in.Role+" account for "+in.Name+" ("+in.GroupCode+")")
 	writeJSON(w, 201, StaffUser{id, in.Name, in.Email, in.Role, in.GroupCode, houseOf(in.GroupCode)})
 }
 

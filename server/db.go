@@ -56,8 +56,14 @@ CREATE TABLE IF NOT EXISTS heats (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id  INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   age_group TEXT NOT NULL,
-  number    INTEGER NOT NULL,
-  time      TEXT NOT NULL DEFAULT ''
+  number    INTEGER NOT NULL
+);
+-- Start time for one event and age group, e.g. "Under 14 100m at 09:30". Heats have no time of their own.
+CREATE TABLE IF NOT EXISTS block_times (
+  event_id  INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  age_group TEXT NOT NULL,
+  time      TEXT NOT NULL,
+  PRIMARY KEY (event_id, age_group)
 );
 CREATE TABLE IF NOT EXISTS heat_entries (
   heat_id    INTEGER NOT NULL REFERENCES heats(id)    ON DELETE CASCADE,
@@ -81,6 +87,8 @@ func openDB(path string) (*DB, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Heats used to carry their own time. Times now belong to an event and age group. Fails harmlessly on new databases.
+	db.Exec(`ALTER TABLE heats DROP COLUMN time`)
 	// Added later: the student's KAMAR id. Fails harmlessly when the column already exists.
 	db.Exec(`ALTER TABLE students ADD COLUMN kamar_id TEXT`)
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_students_kamar ON students(kamar_id) WHERE kamar_id IS NOT NULL`); err != nil {

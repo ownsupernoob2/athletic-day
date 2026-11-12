@@ -5,9 +5,9 @@ import { ageGroups, type Heat } from "@/lib/api";
 export type PrintStyle = "traditional" | "modern";
 
 export type Header =
-  | { kind: "title"; text: string; label: string; cont: boolean } // traditional: "Under 16 100m (4 Heats)"
+  | { kind: "title"; text: string; label: string; cont: boolean; time: string } // traditional: "Under 16 100m (4 Heats)"
   | { kind: "event"; text: string; label: string; cont: boolean } // modern: big event name
-  | { kind: "age"; text: string }; // modern: age group label
+  | { kind: "age"; text: string; time: string }; // modern: age group label and its start time
 
 export type Entry = { headers: Header[]; heat: Heat };
 export type TocEntry = { label: string; page: number; time: string };
@@ -57,7 +57,7 @@ function headersFor(style: PrintStyle, h: Heat, prev: Heat | null, heats: Heat[]
     if (prev && prev.event_id === h.event_id && prev.age_group === h.age_group) return [];
     const count = heats.filter((x) => x.event_id === h.event_id && x.age_group === h.age_group).length;
     const label = `${h.age_group} ${h.event_name}`;
-    return [{ kind: "title", label, text: `${label} (${plural(count, "Heat")})`, cont: prev === null && h.number > 1 }];
+    return [{ kind: "title", label, text: `${label} (${plural(count, "Heat")})`, cont: prev === null && h.number > 1, time: h.time }];
   }
   const out: Header[] = [];
   const sameEvent = !!prev && prev.event_id === h.event_id;
@@ -65,7 +65,7 @@ function headersFor(style: PrintStyle, h: Heat, prev: Heat | null, heats: Heat[]
     const first = !heats.some((x) => x.event_id === h.event_id && (ageGroups.indexOf(x.age_group) < ageGroups.indexOf(h.age_group) || (x.age_group === h.age_group && x.number < h.number)));
     out.push({ kind: "event", label: h.event_name, text: h.event_name, cont: !first });
   }
-  if (!sameEvent || prev!.age_group !== h.age_group) out.push({ kind: "age", text: h.age_group });
+  if (!sameEvent || prev!.age_group !== h.age_group) out.push({ kind: "age", text: h.age_group, time: h.time });
   return out;
 }
 

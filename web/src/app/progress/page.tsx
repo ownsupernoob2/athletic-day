@@ -26,7 +26,11 @@ function ProgressView() {
 
   return (
     <>
-      <PageTitle title="Athletics day progress" subtitle="How the setup of the day is going across the whole school." />
+      <PageTitle
+        title="Athletics day progress"
+        subtitle={p.demo ? undefined : "How the setup of the day is going across the whole school."}
+        actions={p.demo ? <span className="rounded bg-indigo-50 px-3 py-1.5 text-sm font-medium text-ink ring-1 ring-inset ring-signal/40">This page is only for testing</span> : undefined}
+      />
 
       <Card className="mb-6 p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -72,10 +76,6 @@ function DemoView({ groups }: { groups: GroupStatus[] }) {
 
   return (
     <>
-      <p className="mb-8 rounded border border-signal/40 bg-indigo-50 px-4 py-3 text-sm text-ink">
-        <strong>Demo view.</strong> Staff names and live server activity are shown for the demo only. This is switched off on the real server.
-      </p>
-
       <h2 className="mb-3 text-xl font-light text-signal">Who has finished</h2>
       <p className="mb-3 text-sm text-zinc-500">
         {counts.done} finished · {counts.progress} in progress · {counts.none} not started

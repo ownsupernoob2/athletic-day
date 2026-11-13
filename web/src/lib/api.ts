@@ -44,6 +44,7 @@ export type Settings = {
   max_events: number;
   max_per_type: number;
   heat_size: number;
+  heat_minutes: number;
   published: boolean;
   generated_at: string;
   day_start: string;
@@ -124,7 +125,14 @@ export type Heat = {
 
 export type Unplaced = { event_id: number; age_group: string; student: HeatStudent };
 
-export type ScheduleData = { settings: Settings; heats: Heat[]; unplaced: Unplaced[] };
+export type ClashBlock = { event_id: number; event_name: string; age_group: string; time: string; until: string };
+
+/** Students entered in two events that are on at the same time. */
+export type Clash = { a: ClashBlock; b: ClashBlock; count: number; students: HeatStudent[] };
+
+export type Clashes = { pairs: number; students: number; list: Clash[] };
+
+export type ScheduleData = { settings: Settings; heats: Heat[]; unplaced: Unplaced[]; clashes: Clashes };
 
 export type PublicSchedule = { published: boolean; title: string; event_date: string; heats: Heat[] };
 

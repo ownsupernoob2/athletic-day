@@ -132,7 +132,8 @@ func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, 200, map[string]any{"settings": s.settings(), "heats": heats, "unplaced": unplaced})
+	perHeat, _ := strconv.Atoi(getSetting(s.db, "heat_minutes", "3"))
+	writeJSON(w, 200, map[string]any{"settings": s.settings(), "heats": heats, "unplaced": unplaced, "clashes": clashesOf(heats, perHeat)})
 }
 
 // balanced splits n items into the fewest heats of at most `size`, as evenly as possible

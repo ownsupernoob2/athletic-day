@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ExternalLink, Eye, EyeOff, Plus, Search, Shuffle, Trash2, UserPlus, X, ListOrdered } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, Eye, EyeOff, Plus, Search, Shuffle, Trash2, UserPlus, X, ListOrdered } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
@@ -20,7 +20,7 @@ import {
   Spinner,
   useToast,
 } from "@/components/ui";
-import { ageGroups, api, errorMessage, fetcher, timeAgo, type Heat, type ScheduleData, type Settings, type Student } from "@/lib/api";
+import { ageGroups, api, errorMessage, fetcher, timeAgo, type ClashBlock, type Clashes, type Heat, type ScheduleData, type Settings, type Student } from "@/lib/api";
 
 export default function SchedulePage() {
   const toast = useToast();
@@ -151,6 +151,8 @@ export default function SchedulePage() {
           ask={ask}
         />
       )}
+
+      {hasSchedule && data.heats.some((h) => h.time) && <ClashCard clashes={data.clashes} minutes={settings.heat_minutes} />}
 
       {stale && (
         <Banner tone="amber">
@@ -503,5 +505,52 @@ function TimesCard({
         {span > 0 ? `${track} track and ${field} field events and age groups (${heats.length} heats), over ${Math.floor(span / 60)} h ${span % 60} min.${typedIn ? ` ${typedIn} typed-in time${typedIn === 1 ? " is" : "s are"} kept.` : ""}` : "The finish time must be after the start time."}
       </p>
     </Card>
+  );
+}
+
+/** Warns when someone is entered in two events that are on at the same time. */
+function ClashCard({ clashes, minutes }: { clashes: Clashes; minutes: number }) {
+  const [open, setOpen] = useState(false);
+  if (clashes.pairs === 0)
+    return (
+      <p className="mb-4 flex items-center gap-2 text-sm text-emerald-700">
+        <Check className="size-4" strokeWidth={3} /> No clashes: nobody is entered in two events at the same time.
+      </p>
+    );
+
+  const label = (b: ClashBlock) => `${b.age_group} ${b.event_name} ${b.time} to ${b.until}`;
+  return (
+    <Banner tone="amber">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          <strong>{clashes.students}</strong> {clashes.students === 1 ? "student is" : "students are"} entered in two events at the same time ({clashes.pairs} {clashes.pairs === 1 ? "pair" : "pairs"} of events).
+        </span>
+        <button className="font-medium underline" onClick={() => setOpen((v) => !v)}>
+          {open ? "Hide" : "Show and fix"}
+        </button>
+      </div>
+      {open && (
+        <>
+          <p className="mt-2 text-xs text-amber-900/80">
+            Change one of the start times above to fix a clash. Each heat counts as {minutes} minutes (change this on Events &amp; rules), so an event lasts for its heats times that. The biggest clashes are first.
+          </p>
+          <ul className="mt-3 divide-y divide-amber-200/70 rounded bg-white/60">
+            {clashes.list.map((c) => (
+              <li key={`${c.a.event_id}-${c.a.age_group}-${c.b.event_id}-${c.b.age_group}`} className="px-3 py-2 text-sm">
+                <p>
+                  <strong>{label(c.a)}</strong> overlaps <strong>{label(c.b)}</strong>
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-600">
+                  {c.count} {c.count === 1 ? "student" : "students"} in both:{" "}
+                  {c.students.map((st) => `${st.first_name} ${st.last_name} (${st.group_code})`).join(", ")}
+                  {c.count > c.students.length && `, and ${c.count - c.students.length} more`}
+                </p>
+              </li>
+            ))}
+          </ul>
+          {clashes.pairs > clashes.list.length && <p className="mt-2 text-xs text-amber-900/80">Showing the {clashes.list.length} biggest of {clashes.pairs}.</p>}
+        </>
+      )}
+    </Banner>
   );
 }

@@ -142,6 +142,7 @@ func (s *Server) bootstrap() error {
 		"max_events": "5", // most events one student can do
 		"max_per_type": "3", // most track, and most field, events one student can do
 		"heat_size":  "6",
+		"heat_minutes": "3", // about how long one heat takes; only used to check for clashes
 		"published":  "0",
 	} {
 		s.db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)`, k, v)

@@ -20,6 +20,7 @@ func eventLimits(db *DB) (min, max, maxPerType int) {
 func (s *Server) settings() map[string]any {
 	min, max, maxPerType := eventLimits(s.db)
 	heat, _ := strconv.Atoi(getSetting(s.db, "heat_size", "6"))
+	heatMinutes, _ := strconv.Atoi(getSetting(s.db, "heat_minutes", "3"))
 	return map[string]any{
 		"title":              getSetting(s.db, "title", "School Athletics Day"),
 		"event_date":         getSetting(s.db, "event_date", ""),
@@ -27,6 +28,7 @@ func (s *Server) settings() map[string]any {
 		"max_events":         max,
 		"max_per_type":       maxPerType,
 		"heat_size":          heat,
+		"heat_minutes":       heatMinutes,
 		"published":          getSetting(s.db, "published", "0") == "1",
 		"generated_at":       getSetting(s.db, "generated_at", ""),
 		"day_start":          getSetting(s.db, "day_start", "09:00"),
@@ -48,6 +50,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		MaxEvents *int    `json:"max_events"`
 		PerType   *int    `json:"max_per_type"`
 		HeatSize  *int    `json:"heat_size"`
+		HeatMins  *int    `json:"heat_minutes"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -104,6 +107,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		setSetting(s.db, "heat_size", strconv.Itoa(*in.HeatSize))
+	}
+	if in.HeatMins != nil {
+		if *in.HeatMins < 1 || *in.HeatMins > 60 {
+			fail(w, 400, "Minutes per heat must be between 1 and 60")
+			return
+		}
+		setSetting(s.db, "heat_minutes", strconv.Itoa(*in.HeatMins))
 	}
 	writeJSON(w, 200, s.settings())
 }

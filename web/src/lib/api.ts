@@ -118,6 +118,7 @@ export type Heat = {
   age_group: string;
   number: number;
   time: string;
+  time_fixed: boolean; // typed in by hand: automatic times keep it
   students: HeatStudent[];
 };
 

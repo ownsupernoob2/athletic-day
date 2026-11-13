@@ -225,7 +225,10 @@ export default function SchedulePage() {
             {byEvent.map((ev) => (
               <section key={ev.id}>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 pb-2">
-                  <h2 className="text-xl font-semibold tracking-tight">{ev.name}</h2>
+                  <h2 className="text-xl font-semibold tracking-tight">
+                    {ev.name}
+                    <span className="ml-3 align-middle text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">{ev.heats[0]?.kind}</span>
+                  </h2>
                   <div className="flex items-center gap-2">
                     <Select
                       className="!h-8 !w-36 text-xs"
@@ -265,6 +268,7 @@ export default function SchedulePage() {
                             eventName={ev.name}
                             age={a}
                             time={ev.heats.find((h) => h.age_group === a)?.time ?? ""}
+                            fixed={ev.heats.find((h) => h.age_group === a)?.time_fixed ?? false}
                             onSave={(time) => apply(() => api.patch<ScheduleData>("/api/schedule/block-time", { event_id: ev.id, age_group: a, time }), time ? "Start time saved" : "Start time removed")}
                           />
                         </div>
@@ -314,7 +318,7 @@ function Banner({ tone, children }: { tone: "amber"; children: React.ReactNode }
 type Apply = (fn: () => Promise<ScheduleData>, message?: string) => Promise<void>;
 
 /** Start time for one event and age group, e.g. "Under 14 100m starts 09:30". Saves when you leave the field. */
-function BlockTime({ eventName, age, time, onSave }: { eventName: string; age: string; time: string; onSave: (time: string) => Promise<void> }) {
+function BlockTime({ eventName, age, time, fixed, onSave }: { eventName: string; age: string; time: string; fixed: boolean; onSave: (time: string) => Promise<void> }) {
   const [value, setValue] = useState(time);
   const save = () => {
     if (value !== time) onSave(value);
@@ -331,6 +335,11 @@ function BlockTime({ eventName, age, time, onSave }: { eventName: string; age: s
         aria-label={`Start time for ${age} ${eventName}`}
         className="h-8 w-[8rem] rounded-md border-0 bg-white px-2 text-sm tabular-nums text-ink ring-1 ring-inset ring-zinc-300 hover:ring-zinc-400 focus:ring-2 focus:ring-ink focus:outline-none"
       />
+      {fixed && (
+        <span className="rounded-sm bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ink" title="You set this time, so automatic times leave it alone. Empty the box to let automatic times handle it again.">
+          Fixed
+        </span>
+      )}
     </label>
   );
 }
@@ -451,24 +460,28 @@ function TimesCard({
   const [start, setStart] = useState(settings.day_start);
   const [end, setEnd] = useState(settings.day_end);
   const hasTimes = heats.some((h) => h.time);
+  const hasAutoTimes = heats.some((h) => h.time && !h.time_fixed);
 
   const minutes = (v: string) => {
     const [h, m] = v.split(":").map(Number);
     return h * 60 + m;
   };
   const span = start && end ? minutes(end) - minutes(start) : 0;
-  const blocks = new Set(heats.map((h) => `${h.event_id}|${h.age_group}`)).size;
+  const blockSet = (kind: string) => new Set(heats.filter((h) => h.kind === kind).map((h) => `${h.event_id}|${h.age_group}`)).size;
+  const track = blockSet("track");
+  const field = blockSet("field");
+  const typedIn = new Set(heats.filter((h) => h.time_fixed).map((h) => `${h.event_id}|${h.age_group}`)).size;
 
   const run = () =>
-    hasTimes
-      ? ask({ title: "Replace the current times?", body: "Every event and age group gets a new start time. Times you typed in by hand are replaced.", label: "Set times", run: () => onApply(start, end) })
+    hasAutoTimes
+      ? ask({ title: "Replace the automatic times?", body: "Events and age groups get new start times. Times you typed in yourself (marked Fixed) are kept.", label: "Set times", run: () => onApply(start, end) })
       : onApply(start, end);
 
   return (
     <Card className="mb-6 p-5">
       <h2 className="font-semibold">Times</h2>
       <p className="mt-0.5 text-sm text-zinc-500">
-        Pick when the day starts and when you want everything finished. Each event and age group gets a start time, with more time for the ones with more heats. You can change any start time below.
+        Pick when the day starts and when you want everything finished. Track and field run at the same time, so each is spread across the day on its own, with more time for the ones with more heats. Type a start time yourself, such as a set field time, and it is kept (marked Fixed).
       </p>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="text-sm font-medium">
@@ -483,11 +496,11 @@ function TimesCard({
           Set times automatically
         </Button>
         {hasTimes && (
-          <Button onClick={() => ask({ title: "Clear all times?", body: "Every event and age group loses its start time.", label: "Clear", run: onClear })}>Clear times</Button>
+          <Button onClick={() => ask({ title: "Clear all times?", body: "Every event and age group loses its start time, including the ones you typed in (marked Fixed).", label: "Clear", run: onClear })}>Clear times</Button>
         )}
       </div>
       <p className="mt-3 text-sm text-zinc-500">
-        {span > 0 ? `${blocks} events and age groups, ${heats.length} heats, over ${Math.floor(span / 60)} h ${span % 60} min.` : "The finish time must be after the start time."}
+        {span > 0 ? `${track} track and ${field} field events and age groups (${heats.length} heats), over ${Math.floor(span / 60)} h ${span % 60} min.${typedIn ? ` ${typedIn} typed-in time${typedIn === 1 ? " is" : "s are"} kept.` : ""}` : "The finish time must be after the start time."}
       </p>
     </Card>
   );

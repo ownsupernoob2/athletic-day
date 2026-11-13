@@ -31,12 +31,13 @@ type Heat struct {
 	Kind      string        `json:"kind"`
 	AgeGroup  string        `json:"age_group"`
 	Number    int           `json:"number"`
-	Time      string        `json:"time"` // start time of this heat's event and age group, "" if not set
+	Time      string        `json:"time"`       // start time of this heat's event and age group, "" if not set
+	TimeFixed bool          `json:"time_fixed"` // that time was typed in by hand, so automatic times keep it
 	Students  []HeatStudent `json:"students"`
 }
 
 func (s *Server) loadHeats() ([]Heat, error) {
-	rows, err := s.db.Query(`SELECT h.id,h.event_id,e.code,e.name,e.kind,h.age_group,h.number,COALESCE(bt.time,''),e.position
+	rows, err := s.db.Query(`SELECT h.id,h.event_id,e.code,e.name,e.kind,h.age_group,h.number,COALESCE(bt.time,''),COALESCE(bt.fixed,0),e.position
 		FROM heats h JOIN events e ON e.id=h.event_id
 		LEFT JOIN block_times bt ON bt.event_id=h.event_id AND bt.age_group=h.age_group`)
 	if err != nil {
@@ -48,10 +49,11 @@ func (s *Server) loadHeats() ([]Heat, error) {
 	byID := map[int64]int{}
 	for rows.Next() {
 		var h Heat
-		var p int
-		if err := rows.Scan(&h.ID, &h.EventID, &h.EventCode, &h.EventName, &h.Kind, &h.AgeGroup, &h.Number, &h.Time, &p); err != nil {
+		var p, fixed int
+		if err := rows.Scan(&h.ID, &h.EventID, &h.EventCode, &h.EventName, &h.Kind, &h.AgeGroup, &h.Number, &h.Time, &fixed, &p); err != nil {
 			return nil, err
 		}
+		h.TimeFixed = fixed == 1
 		h.Students = []HeatStudent{}
 		pos[h.ID] = p
 		heats = append(heats, h)
@@ -297,6 +299,7 @@ func (s *Server) handleCreateHeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetBlockTime sets (or clears, with "") the start time of one event and age group.
+// A time typed in this way is "fixed": automatic times will not change it.
 func (s *Server) handleSetBlockTime(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		EventID  int64  `json:"event_id"`
@@ -321,8 +324,8 @@ func (s *Server) handleSetBlockTime(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Time must look like 09:30")
 			return
 		}
-		if _, err := s.db.Exec(`INSERT INTO block_times(event_id,age_group,time) VALUES(?,?,?)
-			ON CONFLICT(event_id,age_group) DO UPDATE SET time=excluded.time`, in.EventID, in.AgeGroup, fmtClock(m)); err != nil {
+		if _, err := s.db.Exec(`INSERT INTO block_times(event_id,age_group,time,fixed) VALUES(?,?,?,1)
+			ON CONFLICT(event_id,age_group) DO UPDATE SET time=excluded.time, fixed=1`, in.EventID, in.AgeGroup, fmtClock(m)); err != nil {
 			serverErr(w, err)
 			return
 		}
@@ -479,10 +482,13 @@ func parseClock(v string) (int, bool) {
 
 func fmtClock(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
 
-// handleSetTimes gives every event and age group a start time. With start and end it
-// spreads them across the day in schedule order, each getting time in proportion to how
-// many heats it has, so the last one finishes at `end`. Any time can still be edited by hand
-// afterwards. {"clear": true} removes all times.
+// handleSetTimes gives every event and age group a start time.
+//
+// Track and field run at the same time on the day, so they are two separate timelines.
+// Each timeline is spread across start..end in schedule order, every event and age group
+// getting time in proportion to its heats, so the last one finishes at `end`.
+// Times typed in by hand (fixed, e.g. the set field times) are kept, and do not take
+// time from the others. {"clear": true} removes every time, fixed ones too.
 func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Start string `json:"start"`
@@ -521,40 +527,58 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	type block struct {
 		event int64
 		age   string
+		kind  string
 		heats int
+		fixed bool
 	}
 	var blocks []block
 	for _, h := range heats {
 		if n := len(blocks); n > 0 && blocks[n-1].event == h.EventID && blocks[n-1].age == h.AgeGroup {
 			blocks[n-1].heats++
 		} else {
-			blocks = append(blocks, block{h.EventID, h.AgeGroup, 1})
+			blocks = append(blocks, block{h.EventID, h.AgeGroup, h.Kind, 1, h.TimeFixed})
 		}
 	}
 
-	slot := float64(end-start) / float64(len(heats)) // minutes per heat
-	step := 5.0                                      // tidy 5-minute marks, unless heats are shorter than that
-	if slot < 5 {
-		step = 1
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		serverErr(w, err)
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM block_times`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM block_times WHERE fixed=0`); err != nil {
 		serverErr(w, err)
 		return
 	}
-	done := 0
-	for _, b := range blocks {
-		m := start + int(math.Floor(float64(done)*slot/step)*step) // floor: never reaches `end`
-		if _, err := tx.Exec(`INSERT INTO block_times(event_id,age_group,time) VALUES(?,?,?)`, b.event, b.age, fmtClock(m)); err != nil {
-			serverErr(w, err)
-			return
+	set := map[string]int{"track": 0, "field": 0}
+	for _, kind := range []string{"track", "field"} {
+		total := 0
+		for _, b := range blocks {
+			if b.kind == kind && !b.fixed {
+				total += b.heats
+			}
 		}
-		done += b.heats
+		if total == 0 {
+			continue
+		}
+		slot := float64(end-start) / float64(total) // minutes per heat in this timeline
+		step := 5.0                                  // tidy 5-minute marks, unless heats are shorter than that
+		if slot < 5 {
+			step = 1
+		}
+		done := 0
+		for _, b := range blocks {
+			if b.kind != kind || b.fixed {
+				continue
+			}
+			m := start + int(math.Floor(float64(done)*slot/step)*step) // floor: never reaches `end`
+			if _, err := tx.Exec(`INSERT INTO block_times(event_id,age_group,time,fixed) VALUES(?,?,?,0)`, b.event, b.age, fmtClock(m)); err != nil {
+				serverErr(w, err)
+				return
+			}
+			done += b.heats
+			set[kind]++
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		serverErr(w, err)
@@ -562,6 +586,6 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	}
 	setSetting(s.db, "day_start", fmtClock(start))
 	setSetting(s.db, "day_end", fmtClock(end))
-	s.logEvent("schedule", userFrom(r).Name, fmt.Sprintf("set times for %d events and age groups, %s to %s", len(blocks), fmtClock(start), fmtClock(end)))
+	s.logEvent("schedule", userFrom(r).Name, fmt.Sprintf("set times, %s to %s: %d track and %d field blocks (typed-in times kept)", fmtClock(start), fmtClock(end), set["track"], set["field"]))
 	s.handleGetSchedule(w, r)
 }

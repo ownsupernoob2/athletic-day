@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS block_times (
   event_id  INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   age_group TEXT NOT NULL,
   time      TEXT NOT NULL,
+  fixed     INTEGER NOT NULL DEFAULT 0, -- 1 = typed in by hand (e.g. a set field time); automatic times leave it alone
   PRIMARY KEY (event_id, age_group)
 );
 CREATE TABLE IF NOT EXISTS heat_entries (
@@ -89,6 +90,8 @@ func openDB(path string) (*DB, error) {
 	}
 	// Heats used to carry their own time. Times now belong to an event and age group. Fails harmlessly on new databases.
 	db.Exec(`ALTER TABLE heats DROP COLUMN time`)
+	// Times typed in by hand are "fixed". Fails harmlessly when the column already exists.
+	db.Exec(`ALTER TABLE block_times ADD COLUMN fixed INTEGER NOT NULL DEFAULT 0`)
 	// Added later: the student's KAMAR id. Fails harmlessly when the column already exists.
 	db.Exec(`ALTER TABLE students ADD COLUMN kamar_id TEXT`)
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_students_kamar ON students(kamar_id) WHERE kamar_id IS NOT NULL`); err != nil {

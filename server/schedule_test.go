@@ -158,3 +158,79 @@ func TestOldHeatTimeColumnIsDropped(t *testing.T) {
 		t.Error("heats still has a time column")
 	}
 }
+
+func TestTrackAndFieldRunTogether(t *testing.T) {
+	s, do := organiserClient(t)
+
+	// Ages are measured on the event date, so fix it. 100m (track, id 1) and Discus (field, id 7)
+	// for 8 runners aged 13 (Under 14) and 8 aged 14 (Under 15).
+	do("PUT", "/api/settings", `{"event_date":"2026-06-01"}`)
+	for i := 0; i < 16; i++ {
+		age := 13
+		if i >= 8 {
+			age = 14
+		}
+		res, _ := s.db.Exec(`INSERT INTO students(first_name,last_name,dob,group_code,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
+			fmt.Sprintf("S%d", i), fmt.Sprintf("L%02d", i), fmt.Sprintf("%d-12-31", 2026-age-1), "SSH", now(), now())
+		id, _ := res.LastInsertId()
+		s.db.Exec(`INSERT INTO entries(student_id,event_id) VALUES(?,1),(?,7)`, id, id)
+	}
+	do("POST", "/api/schedule/generate", `{"randomize":false}`)
+	if code, out := do("POST", "/api/schedule/times", `{"start":"09:00","end":"12:00"}`); code != 200 {
+		t.Fatalf("times: %d %s", code, out)
+	}
+	load := func() map[string]Heat { // first heat of each event + age group
+		code, body := do("GET", "/api/schedule", "")
+		var d struct {
+			Heats []Heat `json:"heats"`
+		}
+		if code != 200 || json.Unmarshal(body, &d) != nil {
+			t.Fatalf("schedule: %d %s", code, body)
+		}
+		out := map[string]Heat{}
+		for _, h := range d.Heats {
+			k := fmt.Sprintf("%s|%s", h.Kind, h.AgeGroup)
+			if _, ok := out[k]; !ok {
+				out[k] = h
+			}
+		}
+		return out
+	}
+
+	// Both timelines start at 09:00: the first field block does not wait for the track to finish.
+	b := load()
+	if b["track|Under 14"].Time != "09:00" || b["field|Under 14"].Time != "09:00" {
+		t.Errorf("track starts %s and field starts %s, both should start at 09:00", b["track|Under 14"].Time, b["field|Under 14"].Time)
+	}
+	for k, h := range b {
+		if m, _ := parseClock(h.Time); m < 9*60 || m >= 12*60 {
+			t.Errorf("%s at %s is outside 09:00-12:00", k, h.Time)
+		}
+	}
+
+	// A field time typed in by hand is fixed: automatic times keep it and flag it.
+	field := b["field|Under 14"]
+	patch := fmt.Sprintf(`{"event_id":%d,"age_group":%q,"time":"10:30"}`, field.EventID, field.AgeGroup)
+	if code, out := do("PATCH", "/api/schedule/block-time", patch); code != 200 {
+		t.Fatalf("set fixed: %d %s", code, out)
+	}
+	do("POST", "/api/schedule/times", `{"start":"09:00","end":"12:00"}`)
+	b = load()
+	if h := b["field|Under 14"]; h.Time != "10:30" || !h.TimeFixed {
+		t.Errorf("fixed field time changed or lost its flag: %s fixed=%v", h.Time, h.TimeFixed)
+	}
+	if h := b["field|Under 15"]; h.TimeFixed || h.Time != "09:00" {
+		t.Errorf("the other field block should be spread from 09:00, got %s fixed=%v", h.Time, h.TimeFixed)
+	}
+	if h := b["track|Under 14"]; h.TimeFixed || h.Time != "09:00" {
+		t.Errorf("track should be untouched by the field time: %s fixed=%v", h.Time, h.TimeFixed)
+	}
+
+	// Clearing removes every time, fixed ones too.
+	do("POST", "/api/schedule/times", `{"clear":true}`)
+	for k, h := range load() {
+		if h.Time != "" || h.TimeFixed {
+			t.Errorf("%s still has a time after clearing: %s", k, h.Time)
+		}
+	}
+}

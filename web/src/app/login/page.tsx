@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, ErrorNote, Field, Input } from "@/components/ui";
@@ -49,6 +50,9 @@ export default function LoginPage() {
         </Button>
       </form>
       <p className="mt-6 text-center text-sm text-zinc-400">Forgot your password? Ask the organiser to reset it.</p>
+      <p className="mt-3 text-center text-xs text-zinc-400">
+        By signing in you agree to the <Link href="/terms" className="underline underline-offset-2 hover:text-signal">terms</Link> and <Link href="/privacy" className="underline underline-offset-2 hover:text-signal">privacy policy</Link>.
+      </p>
     </div>
   );
 }

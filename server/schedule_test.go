@@ -162,8 +162,9 @@ func TestOldHeatTimeColumnIsDropped(t *testing.T) {
 func TestTrackAndFieldRunTogether(t *testing.T) {
 	s, do := organiserClient(t)
 
-	// Ages are measured on the event date, so fix it. 100m (track, id 1) and Discus (field, id 7)
-	// for 8 runners aged 13 (Under 14) and 8 aged 14 (Under 15).
+	// Ages are measured on the event date, so fix it. 100m (track, id 1) and Discus (field, id 7):
+	// 8 students aged 13 (Under 14) and 8 aged 14 (Under 15), half doing only the 100m and half only
+	// the discus, so track and field have no student in common and can start together.
 	do("PUT", "/api/settings", `{"event_date":"2026-06-01"}`)
 	for i := 0; i < 16; i++ {
 		age := 13
@@ -173,7 +174,11 @@ func TestTrackAndFieldRunTogether(t *testing.T) {
 		res, _ := s.db.Exec(`INSERT INTO students(first_name,last_name,dob,group_code,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
 			fmt.Sprintf("S%d", i), fmt.Sprintf("L%02d", i), fmt.Sprintf("%d-12-31", 2026-age-1), "SSH", now(), now())
 		id, _ := res.LastInsertId()
-		s.db.Exec(`INSERT INTO entries(student_id,event_id) VALUES(?,1),(?,7)`, id, id)
+		event := 1
+		if i%2 == 1 {
+			event = 7
+		}
+		s.db.Exec(`INSERT INTO entries(student_id,event_id) VALUES(?,?)`, id, event)
 	}
 	do("POST", "/api/schedule/generate", `{"randomize":false}`)
 	if code, out := do("POST", "/api/schedule/times", `{"start":"09:00","end":"12:00"}`); code != 200 {

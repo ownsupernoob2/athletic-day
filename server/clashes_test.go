@@ -15,7 +15,7 @@ func heatOf(id, event int64, name, age, time string, students ...int64) Heat {
 }
 
 func TestClashesOf(t *testing.T) {
-	const perHeat = 3
+	d := durations{perHeat: 3}
 	cases := []struct {
 		name  string
 		heats []Heat
@@ -31,7 +31,7 @@ func TestClashesOf(t *testing.T) {
 		{"one event on twice is not a clash", []Heat{heatOf(1, 1, "100m", "Under 14", "09:00", 1), heatOf(2, 1, "100m", "Under 15", "09:00", 1)}, 0, 0},
 	}
 	for _, c := range cases {
-		got := clashesOf(c.heats, perHeat)
+		got := clashesOf(c.heats, d)
 		if got.Pairs != c.pairs {
 			t.Errorf("%s: %d pairs, want %d", c.name, got.Pairs, c.pairs)
 		}
@@ -49,7 +49,7 @@ func TestClashesOf(t *testing.T) {
 		heatOf(2, 7, "Discus", "Under 14", "09:00", 1, 2),
 		heatOf(3, 8, "High Jump", "Under 14", "09:00", 1),
 	}
-	if got := clashesOf(h, perHeat); got.Pairs != 3 || got.Students != 2 {
+	if got := clashesOf(h, d); got.Pairs != 3 || got.Students != 2 {
 		t.Errorf("3 events at once: %d pairs, %d students; want 3 and 2", got.Pairs, got.Students)
 	}
 }
@@ -79,8 +79,9 @@ func TestScheduleReportsClashes(t *testing.T) {
 		t.Errorf("no times set yet, but %d clashes", c.Pairs)
 	}
 
-	// Track and field both start at 09:00, so everyone in both is in two places.
-	do("POST", "/api/schedule/times", `{"start":"09:00","end":"12:00"}`)
+	// Put the 100m and the discus both at 09:00 by hand, so everyone in both is in two places.
+	do("PATCH", "/api/schedule/block-time", `{"event_id":1,"age_group":"Under 14","time":"09:00"}`)
+	do("PATCH", "/api/schedule/block-time", `{"event_id":7,"age_group":"Under 14","time":"09:00"}`)
 	if c := clashes(); c.Pairs != 1 || c.Students != 8 {
 		t.Fatalf("both start at 09:00: %d pairs, %d students; want 1 and 8", c.Pairs, c.Students)
 	}
@@ -95,7 +96,12 @@ func TestScheduleReportsClashes(t *testing.T) {
 	if code, _ := do("PUT", "/api/settings", `{"heat_minutes":0}`); code != 400 {
 		t.Errorf("0 minutes per heat accepted: %d", code)
 	}
-	do("PUT", "/api/settings", `{"heat_minutes":600}`)
+	if code, _ := do("PUT", "/api/settings", `{"heat_minutes":600}`); code != 400 {
+		t.Errorf("600 minutes per heat accepted: %d", code)
+	}
+	if code, _ := do("PUT", "/api/settings", `{"heat_minutes":1.5}`); code != 200 {
+		t.Errorf("1.5 minutes per heat refused: %d", code)
+	}
 	do("PUT", "/api/settings", `{"heat_minutes":60}`)
 	if c := clashes(); c.Pairs != 0 {
 		t.Errorf("14:00 discus vs a 100m that lasts at most 60 min from 09:00: %d clashes", c.Pairs)

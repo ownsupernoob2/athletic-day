@@ -20,7 +20,7 @@ import {
   Spinner,
   useToast,
 } from "@/components/ui";
-import { ageGroups, api, errorMessage, fetcher, timeAgo, type ClashBlock, type Clashes, type Heat, type ScheduleData, type Settings, type Student } from "@/lib/api";
+import { ageGroups, api, errorMessage, fetcher, timeAgo, type ClashBlock, type Clashes, type Heat, type ScheduleData, type Settings, type Student, type Timing } from "@/lib/api";
 
 export default function SchedulePage() {
   const toast = useToast();
@@ -146,6 +146,7 @@ export default function SchedulePage() {
         <TimesCard
           settings={settings}
           heats={data.heats}
+          timing={data.timing}
           onApply={(start, end) => apply(() => api.post<ScheduleData>("/api/schedule/times", { start, end }), "Times set")}
           onClear={() => apply(() => api.post<ScheduleData>("/api/schedule/times", { clear: true }), "Times cleared")}
           ask={ask}
@@ -449,12 +450,14 @@ function AddStudentModal({ heat, onClose, apply }: { heat: Heat; onClose: () => 
 function TimesCard({
   settings,
   heats,
+  timing,
   onApply,
   onClear,
   ask,
 }: {
   settings: Settings;
   heats: Heat[];
+  timing: Timing;
   onApply: (start: string, end: string) => Promise<void>;
   onClear: () => Promise<void>;
   ask: (c: { title: string; body: string; label: string; run: () => Promise<void> }) => void;
@@ -469,10 +472,9 @@ function TimesCard({
     return h * 60 + m;
   };
   const span = start && end ? minutes(end) - minutes(start) : 0;
-  const blockSet = (kind: string) => new Set(heats.filter((h) => h.kind === kind).map((h) => `${h.event_id}|${h.age_group}`)).size;
-  const track = blockSet("track");
-  const field = blockSet("field");
   const typedIn = new Set(heats.filter((h) => h.time_fixed).map((h) => `${h.event_id}|${h.age_group}`)).size;
+  // How far past the wanted finish time the last event ends (in minutes), if it does.
+  const over = timing.finish_minutes && end ? Number(timing.finish_minutes) - minutes(end) : 0;
 
   const run = () =>
     hasAutoTimes
@@ -483,7 +485,7 @@ function TimesCard({
     <Card className="mb-6 p-5">
       <h2 className="font-semibold">Times</h2>
       <p className="mt-0.5 text-sm text-zinc-500">
-        Pick when the day starts and when you want everything finished. Track and field run at the same time, so each is spread across the day on its own, with more time for the ones with more heats. Type a start time yourself, such as a set field time, and it is kept (marked Fixed).
+        Pick when the day starts and when you want everything finished. Events are placed so nobody is in two events at once: track events take turns on the one track, each field event has its own area, and track and field run side by side where they can. Type a start time yourself, such as a set field time, and it stays (marked Fixed) while the rest fit around it. How long each event lasts comes from the minutes per heat on Events &amp; rules.
       </p>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="text-sm font-medium">
@@ -501,9 +503,16 @@ function TimesCard({
           <Button onClick={() => ask({ title: "Clear all times?", body: "Every event and age group loses its start time, including the ones you typed in (marked Fixed).", label: "Clear", run: onClear })}>Clear times</Button>
         )}
       </div>
-      <p className="mt-3 text-sm text-zinc-500">
-        {span > 0 ? `${track} track and ${field} field events and age groups (${heats.length} heats), over ${Math.floor(span / 60)} h ${span % 60} min.${typedIn ? ` ${typedIn} typed-in time${typedIn === 1 ? " is" : "s are"} kept.` : ""}` : "The finish time must be after the start time."}
-      </p>
+      {span <= 0 && <p className="mt-3 text-sm text-zinc-500">The finish time must be after the start time.</p>}
+      {span > 0 && timing.first && (
+        <p className={cx("mt-3 text-sm", over > 0 ? "text-amber-800" : "text-zinc-500")}>
+          Events run from {timing.first} to {timing.finish}.
+          {over > 0
+            ? ` That is ${Math.floor(over / 60) ? `${Math.floor(over / 60)} h ` : ""}${over % 60} min after your finish time. Lower the minutes per heat on Events & rules, move the finish time, or move events by hand.`
+            : " That is within your finish time."}
+          {typedIn > 0 && ` ${typedIn} typed-in time${typedIn === 1 ? " is" : "s are"} kept.`}
+        </p>
+      )}
     </Card>
   );
 }
@@ -532,7 +541,7 @@ function ClashCard({ clashes, minutes }: { clashes: Clashes; minutes: number }) 
       {open && (
         <>
           <p className="mt-2 text-xs text-amber-900/80">
-            Change one of the start times above to fix a clash. Each heat counts as {minutes} minutes (change this on Events &amp; rules), so an event lasts for its heats times that. The biggest clashes are first.
+            Change one of the start times above to fix a clash. An event lasts for its heats times {minutes} minutes, unless you set its own time on Events &amp; rules. The biggest clashes are first.
           </p>
           <ul className="mt-3 divide-y divide-amber-200/70 rounded bg-white/60">
             {clashes.list.map((c) => (

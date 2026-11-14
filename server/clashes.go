@@ -41,7 +41,7 @@ type timedBlock struct {
 	students   map[int64]HeatStudent
 }
 
-func clashesOf(heats []Heat, perHeat int) ClashSummary {
+func clashesOf(heats []Heat, d durations) ClashSummary {
 	index := map[string]*timedBlock{}
 	var order []*timedBlock
 	counts := map[*timedBlock]int{}
@@ -66,7 +66,7 @@ func clashesOf(heats []Heat, perHeat int) ClashSummary {
 			continue
 		}
 		b.start = start
-		b.end = start + counts[b]*perHeat
+		b.end = start + d.of(b.EventID, counts[b])
 		b.Until = fmtClock(b.end % (24 * 60))
 		timed = append(timed, b)
 	}

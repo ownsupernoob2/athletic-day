@@ -59,13 +59,19 @@ export default function EventsPage() {
                 <ArrowDown className="size-4" />
               </button>
             </div>
-            <div className={cx("min-w-0 flex-1", !ev.active && "opacity-60")}>
+            <div className={cx("min-w-[9rem] flex-1", !ev.active && "opacity-60")}>
               <p className="font-medium">
                 {ev.name} <span className="ml-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs font-normal text-zinc-600">{ev.code}</span>
               </p>
               <p className="text-xs text-zinc-500">{ev.entry_count} entries</p>
             </div>
             <Pill tone={ev.kind === "track" ? "indigo" : "gray"}>{ev.kind === "track" ? "Track" : "Field"}</Pill>
+            <EventLength
+              key={`${ev.id}-${ev.duration}-${ev.duration_per}`}
+              event={ev}
+              defaultMinutes={settings.heat_minutes}
+              onSave={(duration, per) => act(() => api.patch(`/api/events/${ev.id}`, { duration, duration_per: per }))}
+            />
             <label className="flex items-center gap-2 text-sm text-zinc-600">
               <input type="checkbox" checked={ev.active} onChange={(e) => act(() => api.patch(`/api/events/${ev.id}`, { active: e.target.checked }))} className="size-4 rounded border-zinc-300 accent-indigo-600" />
               On offer
@@ -76,7 +82,9 @@ export default function EventsPage() {
           </div>
         ))}
       </Card>
-      <p className="mt-2 text-xs text-zinc-500">Unticking &ldquo;On offer&rdquo; hides an event from staff and the CSV but keeps existing entries.</p>
+      <p className="mt-2 text-xs text-zinc-500">
+        Unticking &ldquo;On offer&rdquo; hides an event from staff and the CSV but keeps existing entries. &ldquo;Takes&rdquo; is how long the event lasts, in minutes or hours, either for each heat or for each age group&apos;s whole event. Leave it empty to use the default of {settings.heat_minutes} minutes per heat.
+      </p>
 
       <h2 className="mb-3 mt-10 text-lg font-semibold">Add an event</h2>
       <Card className="p-5">
@@ -169,8 +177,8 @@ function SettingsCard({ settings, onSaved }: { settings: Settings; onSaved: () =
           <Field label="Heat size" hint="Most runners in a heat">
             {(id) => <Input id={id} type="number" min={1} max={20} value={heat} onChange={(e) => setHeat(e.target.value)} />}
           </Field>
-          <Field label="Minutes per heat" hint="Used to check for clashes">
-            {(id) => <Input id={id} type="number" min={1} max={60} value={heatMins} onChange={(e) => setHeatMins(e.target.value)} />}
+          <Field label="Minutes per heat" hint="How long a heat takes. Sets how long each event lasts">
+            {(id) => <Input id={id} type="number" min={0.5} max={60} step={0.5} value={heatMins} onChange={(e) => setHeatMins(e.target.value)} />}
           </Field>
         </div>
         <div className="sm:col-span-2 lg:col-span-4">
@@ -180,5 +188,65 @@ function SettingsCard({ settings, onSaved }: { settings: Settings; onSaved: () =
         </div>
       </form>
     </Card>
+  );
+}
+
+/** How long one event takes: a number, minutes or hours, and per heat or for the whole event. Saves when you change it. */
+function EventLength({ event, defaultMinutes, onSave }: { event: AthleticEvent; defaultMinutes: number; onSave: (minutes: number, per: "heat" | "event") => Promise<void> }) {
+  // Show whole hours as hours, so 90 shows as 90 min and 120 as 2 hours.
+  const hours = event.duration > 0 && event.duration % 60 === 0;
+  const [value, setValue] = useState(event.duration > 0 ? String(hours ? event.duration / 60 : event.duration) : "");
+  const [unit, setUnit] = useState<"min" | "hr">(hours ? "hr" : "min");
+  const [per, setPer] = useState<"heat" | "event">(event.duration_per);
+
+  function save(v = value, u = unit, p = per) {
+    const minutes = v.trim() === "" ? 0 : Number(v) * (u === "hr" ? 60 : 1);
+    if (Number.isNaN(minutes) || minutes < 0) return;
+    if (minutes === event.duration && (minutes === 0 || p === event.duration_per)) return;
+    onSave(minutes, p);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 text-sm text-zinc-600" title={`Empty uses the default of ${defaultMinutes} minutes per heat`}>
+      <span className="mr-1">Takes</span>
+      <input
+        type="number"
+        min={0}
+        step={0.5}
+        value={value}
+        placeholder="Default"
+        aria-label={`How long ${event.name} takes`}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => save()}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        className="h-8 w-20 rounded-md border-0 bg-white px-2 text-sm tabular-nums text-ink ring-1 ring-inset ring-zinc-300 placeholder:text-zinc-400 hover:ring-zinc-400 focus:ring-2 focus:ring-ink focus:outline-none"
+      />
+      <select
+        value={unit}
+        aria-label="Minutes or hours"
+        onChange={(e) => {
+          const u = e.target.value as "min" | "hr";
+          setUnit(u);
+          save(value, u, per);
+        }}
+        className="h-8 rounded-md border-0 bg-white px-1.5 text-sm ring-1 ring-inset ring-zinc-300 hover:ring-zinc-400"
+      >
+        <option value="min">min</option>
+        <option value="hr">hours</option>
+      </select>
+      <select
+        value={per}
+        aria-label="Per heat or per event"
+        onChange={(e) => {
+          const p = e.target.value as "heat" | "event";
+          setPer(p);
+          save(value, unit, p);
+        }}
+        className="h-8 rounded-md border-0 bg-white px-1.5 text-sm ring-1 ring-inset ring-zinc-300 hover:ring-zinc-400"
+      >
+        <option value="heat">per heat</option>
+        <option value="event">per event</option>
+      </select>
+    </div>
   );
 }

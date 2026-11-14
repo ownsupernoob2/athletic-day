@@ -20,7 +20,7 @@ func eventLimits(db *DB) (min, max, maxPerType int) {
 func (s *Server) settings() map[string]any {
 	min, max, maxPerType := eventLimits(s.db)
 	heat, _ := strconv.Atoi(getSetting(s.db, "heat_size", "6"))
-	heatMinutes, _ := strconv.Atoi(getSetting(s.db, "heat_minutes", "3"))
+	perHeat := heatMinutes(s.db)
 	return map[string]any{
 		"title":              getSetting(s.db, "title", "School Athletics Day"),
 		"event_date":         getSetting(s.db, "event_date", ""),
@@ -28,11 +28,11 @@ func (s *Server) settings() map[string]any {
 		"max_events":         max,
 		"max_per_type":       maxPerType,
 		"heat_size":          heat,
-		"heat_minutes":       heatMinutes,
+		"heat_minutes":       perHeat,
 		"published":          getSetting(s.db, "published", "0") == "1",
 		"generated_at":       getSetting(s.db, "generated_at", ""),
-		"day_start":          getSetting(s.db, "day_start", "09:00"),
-		"day_end":            getSetting(s.db, "day_end", "15:00"),
+		"day_start":          getSetting(s.db, "day_start", "10:00"),
+		"day_end":            getSetting(s.db, "day_end", "14:00"),
 		"entries_changed_at": getSetting(s.db, "entries_changed_at", ""),
 		"houses":             houses,
 	}
@@ -44,13 +44,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Title     *string `json:"title"`
-		EventDate *string `json:"event_date"`
-		MinEvents *int    `json:"min_events"`
-		MaxEvents *int    `json:"max_events"`
-		PerType   *int    `json:"max_per_type"`
-		HeatSize  *int    `json:"heat_size"`
-		HeatMins  *int    `json:"heat_minutes"`
+		Title     *string  `json:"title"`
+		EventDate *string  `json:"event_date"`
+		MinEvents *int     `json:"min_events"`
+		MaxEvents *int     `json:"max_events"`
+		PerType   *int     `json:"max_per_type"`
+		HeatSize  *int     `json:"heat_size"`
+		HeatMins  *float64 `json:"heat_minutes"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -109,11 +109,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		setSetting(s.db, "heat_size", strconv.Itoa(*in.HeatSize))
 	}
 	if in.HeatMins != nil {
-		if *in.HeatMins < 1 || *in.HeatMins > 60 {
-			fail(w, 400, "Minutes per heat must be between 1 and 60")
+		if *in.HeatMins < 0.5 || *in.HeatMins > 60 {
+			fail(w, 400, "Minutes per heat must be between 0.5 and 60")
 			return
 		}
-		setSetting(s.db, "heat_minutes", strconv.Itoa(*in.HeatMins))
+		setSetting(s.db, "heat_minutes", strconv.FormatFloat(*in.HeatMins, 'f', -1, 64))
 	}
 	writeJSON(w, 200, s.settings())
 }
@@ -129,11 +129,14 @@ type Event struct {
 	Position   int    `json:"position"`
 	Active     bool   `json:"active"`
 	EntryCount int    `json:"entry_count"`
+	// How long this event takes, in minutes. 0 = use the default minutes per heat.
+	Duration    float64 `json:"duration"`
+	DurationPer string  `json:"duration_per"` // "heat": minutes for each heat. "event": minutes for each age group's whole event
 }
 
 func (s *Server) listEvents(onlyActive bool) ([]Event, error) {
 	q := `SELECT e.id,e.code,e.name,e.kind,e.csv_header,e.position,e.active,
-		(SELECT COUNT(*) FROM entries n WHERE n.event_id=e.id) FROM events e`
+		(SELECT COUNT(*) FROM entries n WHERE n.event_id=e.id), e.duration, e.duration_per FROM events e`
 	if onlyActive {
 		q += ` WHERE e.active=1`
 	}
@@ -147,7 +150,7 @@ func (s *Server) listEvents(onlyActive bool) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var a int
-		if err := rows.Scan(&e.ID, &e.Code, &e.Name, &e.Kind, &e.CSVHeader, &e.Position, &a, &e.EntryCount); err != nil {
+		if err := rows.Scan(&e.ID, &e.Code, &e.Name, &e.Kind, &e.CSVHeader, &e.Position, &a, &e.EntryCount, &e.Duration, &e.DurationPer); err != nil {
 			return nil, err
 		}
 		e.Active = a == 1
@@ -172,6 +175,9 @@ type eventInput struct {
 	CSVHeader *string `json:"csv_header"`
 	Active    *bool   `json:"active"`
 	MoveUp    *bool   `json:"move_up"`
+	// How long the event takes, in minutes (0 clears it), and whether that is per heat or for the whole event.
+	Duration    *float64 `json:"duration"`
+	DurationPer *string  `json:"duration_per"`
 }
 
 func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +237,33 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 			a = 1
 		}
 		s.db.Exec(`UPDATE events SET active=? WHERE id=?`, a, id)
+	}
+	if in.Duration != nil || in.DurationPer != nil {
+		minutes, per := -1.0, ""
+		if in.Duration != nil {
+			minutes = *in.Duration
+			if minutes != 0 && (minutes < 0.5 || minutes > 24*60) {
+				fail(w, 400, "How long an event takes must be between 0.5 minutes and 24 hours")
+				return
+			}
+		}
+		if in.DurationPer != nil {
+			per = *in.DurationPer
+			if per != "heat" && per != "event" {
+				fail(w, 400, "Choose per heat or per event")
+				return
+			}
+		}
+		if minutes >= 0 {
+			s.db.Exec(`UPDATE events SET duration=? WHERE id=?`, minutes, id)
+			if minutes == 0 {
+				per = "heat"
+			}
+		}
+		if per != "" {
+			s.db.Exec(`UPDATE events SET duration_per=? WHERE id=?`, per, id)
+		}
+		touchEntries(s.db)
 	}
 	if in.MoveUp != nil {
 		s.moveEvent(id, *in.MoveUp)

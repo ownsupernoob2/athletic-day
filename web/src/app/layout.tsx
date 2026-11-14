@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Overpass, Overpass_Mono, Raleway } from "next/font/google";
+import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { ToastProvider } from "@/components/ui";
 import "./globals.css";
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ToastProvider>
           <Header />
           <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 print:max-w-none print:p-0">{children}</main>
+          <Footer />
         </ToastProvider>
       </body>
     </html>

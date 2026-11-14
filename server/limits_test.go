@@ -113,3 +113,11 @@ func TestEventLimits(t *testing.T) {
 func do2(do func(string, string, string) (int, string), sid int64, eid int) (int, string) {
 	return do("PUT", fmt.Sprintf("/api/students/%d/events/%d", sid, eid), `{"on":true}`)
 }
+
+func TestDefaultDayIs10To2(t *testing.T) {
+	_, do := organiserClient(t)
+	code, body := do("GET", "/api/settings", "")
+	if got := string(body); code != 200 || !strings.Contains(got, `"day_start":"10:00"`) || !strings.Contains(got, `"day_end":"14:00"`) {
+		t.Errorf("default day: %d %s", code, got)
+	}
+}

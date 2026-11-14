@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS events (
   kind       TEXT NOT NULL CHECK (kind IN ('track','field')),
   csv_header TEXT NOT NULL,
   position   INTEGER NOT NULL,
-  active     INTEGER NOT NULL DEFAULT 1
+  active     INTEGER NOT NULL DEFAULT 1,
+  duration     REAL NOT NULL DEFAULT 0,        -- minutes; 0 = use the default minutes per heat
+  duration_per TEXT NOT NULL DEFAULT 'heat'    -- 'heat' = minutes for each heat, 'event' = minutes for each age group's whole event
 );
 CREATE TABLE IF NOT EXISTS entries (
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -90,6 +92,9 @@ func openDB(path string) (*DB, error) {
 	}
 	// Heats used to carry their own time. Times now belong to an event and age group. Fails harmlessly on new databases.
 	db.Exec(`ALTER TABLE heats DROP COLUMN time`)
+	// How long each event takes. Fails harmlessly when the columns already exist.
+	db.Exec(`ALTER TABLE events ADD COLUMN duration REAL NOT NULL DEFAULT 0`)
+	db.Exec(`ALTER TABLE events ADD COLUMN duration_per TEXT NOT NULL DEFAULT 'heat'`)
 	// Times typed in by hand are "fixed". Fails harmlessly when the column already exists.
 	db.Exec(`ALTER TABLE block_times ADD COLUMN fixed INTEGER NOT NULL DEFAULT 0`)
 	// Added later: the student's KAMAR id. Fails harmlessly when the column already exists.
@@ -142,7 +147,7 @@ func (s *Server) bootstrap() error {
 		"max_events": "5", // most events one student can do
 		"max_per_type": "3", // most track, and most field, events one student can do
 		"heat_size":  "6",
-		"heat_minutes": "3", // about how long one heat takes; only used to check for clashes
+		"heat_minutes": "2", // about how long one heat takes; sets how long each event lasts
 		"published":  "0",
 	} {
 		s.db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)`, k, v)

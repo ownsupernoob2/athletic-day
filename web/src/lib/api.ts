@@ -20,6 +20,10 @@ export type AthleticEvent = {
   position: number;
   active: boolean;
   entry_count: number;
+  /** How long the event takes, in minutes. 0 = use the default minutes per heat. */
+  duration: number;
+  /** "heat": the time is for each heat. "event": for each age group's whole event. */
+  duration_per: "heat" | "event";
 };
 
 export type Student = {
@@ -132,7 +136,10 @@ export type Clash = { a: ClashBlock; b: ClashBlock; count: number; students: Hea
 
 export type Clashes = { pairs: number; students: number; list: Clash[] };
 
-export type ScheduleData = { settings: Settings; heats: Heat[]; unplaced: Unplaced[]; clashes: Clashes };
+/** When the first event starts and the last one finishes, from the times set so far. */
+export type Timing = { first: string; finish: string; finish_minutes?: string };
+
+export type ScheduleData = { settings: Settings; heats: Heat[]; unplaced: Unplaced[]; clashes: Clashes; timing: Timing };
 
 export type PublicSchedule = { published: boolean; title: string; event_date: string; heats: Heat[] };
 

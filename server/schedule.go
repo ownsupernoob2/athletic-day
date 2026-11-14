@@ -5,7 +5,6 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"math"
 	"math/rand/v2"
 	"net/http"
 	"sort"
@@ -132,8 +131,8 @@ func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	perHeat, _ := strconv.Atoi(getSetting(s.db, "heat_minutes", "3"))
-	writeJSON(w, 200, map[string]any{"settings": s.settings(), "heats": heats, "unplaced": unplaced, "clashes": clashesOf(heats, perHeat)})
+	d := s.durations()
+	writeJSON(w, 200, map[string]any{"settings": s.settings(), "heats": heats, "unplaced": unplaced, "clashes": clashesOf(heats, d), "timing": timingOf(heats, d)})
 }
 
 // balanced splits n items into the fewest heats of at most `size`, as evenly as possible
@@ -483,13 +482,20 @@ func parseClock(v string) (int, bool) {
 
 func fmtClock(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
 
-// handleSetTimes gives every event and age group a start time.
-//
-// Track and field run at the same time on the day, so they are two separate timelines.
-// Each timeline is spread across start..end in schedule order, every event and age group
-// getting time in proportion to its heats, so the last one finishes at `end`.
-// Times typed in by hand (fixed, e.g. the set field times) are kept, and do not take
-// time from the others. {"clear": true} removes every time, fixed ones too.
+// heatMinutes is about how long one heat takes. It sets how long each event and age group lasts.
+func heatMinutes(db *DB) float64 {
+	v, err := strconv.ParseFloat(getSetting(db, "heat_minutes", "2"), 64)
+	if err != nil || v <= 0 {
+		return 2
+	}
+	return v
+}
+
+// handleSetTimes gives every event and age group a start time, packed from `start` so that
+// nobody is in two events at once and nothing in the same place overlaps (see autotime.go).
+// Times typed in by hand (fixed) are kept and the rest work around them. `end` is the time
+// the organiser wants everything finished by: it is not forced, the schedule reports whether it fits.
+// {"clear": true} removes every time, fixed ones too.
 func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Start string `json:"start"`
@@ -525,21 +531,33 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// loadHeats is in schedule order, so blocks (event + age group) come out in order too.
-	type block struct {
-		event int64
-		age   string
-		kind  string
-		heats int
-		fixed bool
-	}
-	var blocks []block
+	d := s.durations()
+	var blocks []*planBlock
 	for _, h := range heats {
+		var b *planBlock
 		if n := len(blocks); n > 0 && blocks[n-1].event == h.EventID && blocks[n-1].age == h.AgeGroup {
-			blocks[n-1].heats++
+			b = blocks[n-1]
 		} else {
-			blocks = append(blocks, block{h.EventID, h.AgeGroup, h.Kind, 1, h.TimeFixed})
+			b = &planBlock{event: h.EventID, age: h.AgeGroup, kind: h.Kind, fixed: h.TimeFixed, students: map[int64]struct{}{}}
+			if m, ok := parseClock(h.Time); ok && h.TimeFixed {
+				b.start = m
+			} else {
+				b.fixed = false
+			}
+			blocks = append(blocks, b)
+		}
+		b.heats++
+		for _, st := range h.Students {
+			b.students[st.ID] = struct{}{}
 		}
 	}
+	for _, b := range blocks {
+		b.dur = d.of(b.event, b.heats)
+		if b.fixed {
+			b.end = b.start + b.dur
+		}
+	}
+	finish := planTimes(blocks, start)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -551,35 +569,17 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
-	set := map[string]int{"track": 0, "field": 0}
-	for _, kind := range []string{"track", "field"} {
-		total := 0
-		for _, b := range blocks {
-			if b.kind == kind && !b.fixed {
-				total += b.heats
-			}
-		}
-		if total == 0 {
+	set, kept := 0, 0
+	for _, b := range blocks {
+		if b.fixed {
+			kept++
 			continue
 		}
-		slot := float64(end-start) / float64(total) // minutes per heat in this timeline
-		step := 5.0                                  // tidy 5-minute marks, unless heats are shorter than that
-		if slot < 5 {
-			step = 1
+		if _, err := tx.Exec(`INSERT INTO block_times(event_id,age_group,time,fixed) VALUES(?,?,?,0)`, b.event, b.age, fmtClock(b.start%(24*60))); err != nil {
+			serverErr(w, err)
+			return
 		}
-		done := 0
-		for _, b := range blocks {
-			if b.kind != kind || b.fixed {
-				continue
-			}
-			m := start + int(math.Floor(float64(done)*slot/step)*step) // floor: never reaches `end`
-			if _, err := tx.Exec(`INSERT INTO block_times(event_id,age_group,time,fixed) VALUES(?,?,?,0)`, b.event, b.age, fmtClock(m)); err != nil {
-				serverErr(w, err)
-				return
-			}
-			done += b.heats
-			set[kind]++
-		}
+		set++
 	}
 	if err := tx.Commit(); err != nil {
 		serverErr(w, err)
@@ -587,6 +587,41 @@ func (s *Server) handleSetTimes(w http.ResponseWriter, r *http.Request) {
 	}
 	setSetting(s.db, "day_start", fmtClock(start))
 	setSetting(s.db, "day_end", fmtClock(end))
-	s.logEvent("schedule", userFrom(r).Name, fmt.Sprintf("set times, %s to %s: %d track and %d field blocks (typed-in times kept)", fmtClock(start), fmtClock(end), set["track"], set["field"]))
+	msg := fmt.Sprintf("set %d start times, %s to %s, avoiding clashes (%d typed-in kept)", set, fmtClock(start), fmtClock(finish%(24*60)), kept)
+	if finish > end {
+		msg += fmt.Sprintf("; finishes %d min after %s", finish-end, fmtClock(end))
+	}
+	s.logEvent("schedule", userFrom(r).Name, msg)
 	s.handleGetSchedule(w, r)
+}
+
+// timingOf says when the first event starts and the last one finishes, from the times set so far.
+func timingOf(heats []Heat, d durations) map[string]string {
+	counts := map[string]int{}
+	times := map[string]int{}
+	events := map[string]int64{}
+	for _, h := range heats {
+		k := fmt.Sprintf("%d|%s", h.EventID, h.AgeGroup)
+		counts[k]++
+		events[k] = h.EventID
+		if m, ok := parseClock(h.Time); ok {
+			times[k] = m
+		}
+	}
+	first, last := -1, -1
+	for k, m := range times {
+		if first == -1 || m < first {
+			first = m
+		}
+		if e := m + d.of(events[k], counts[k]); e > last {
+			last = e
+		}
+	}
+	out := map[string]string{"first": "", "finish": ""}
+	if first >= 0 {
+		out["first"] = fmtClock(first % (24 * 60))
+		out["finish"] = fmtClock(last % (24 * 60))
+		out["finish_minutes"] = strconv.Itoa(last)
+	}
+	return out
 }
